@@ -147,7 +147,6 @@ async def rate_limit_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-RateLimit-Limit"] = str(limit)
     response.headers["X-RateLimit-Remaining"] = str(remaining)
-    # rough reset for the oldest item in window
     reset_in = int(max(0, window - (now - dq[0]))) if dq else window
     response.headers["X-RateLimit-Reset"] = str(reset_in)
     return response
@@ -174,7 +173,7 @@ app.include_router(orders.router, prefix="/orders", tags=["Orders"])
 # Root endpoint
 @app.get("/", tags=["Root"])
 async def root():
-    """Root endpoint with API information"""
+
     return {
         "message": "Welcome to Restaurant Order System",
     }
