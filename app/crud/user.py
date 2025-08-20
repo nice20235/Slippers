@@ -4,7 +4,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import func
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
-from app.auth.password import hash_password, verify_password
+from app.auth.password import verify_password
 from typing import Optional, List, Tuple
 import logging
 
@@ -73,10 +73,13 @@ async def get_users(
 
 async def create_user(db: AsyncSession, user: UserCreate) -> User:
     """Create new user"""
-    # Hash the password before storing
+    # Get user data without hashing password
     user_data = user.model_dump()
-    user_data['password_hash'] = hash_password(user_data.pop('password'))
+    password = user_data.pop('password')
     user_data.pop('confirm_password', None)  # Remove confirm_password as it's not stored
+    
+    # Store password directly (no hashing)
+    user_data['password_hash'] = password
     
     db_user = User(**user_data)
     db.add(db_user)

@@ -41,9 +41,6 @@ async def register_user(
     db: AsyncSession = Depends(get_db),
     response: Response = None
 ):
-    """
-    Register a new user
-    """
     # Check if user with same name already exists
     existing_user_by_name = await get_user_by_name(db, user_data.name)
     if existing_user_by_name:

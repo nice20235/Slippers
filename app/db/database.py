@@ -1,6 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import StaticPool
+from typing import AsyncGenerator
 import os
 
 # Database URL - use SQLite for development, can be changed to PostgreSQL for production
@@ -32,7 +33,7 @@ class Base(DeclarativeBase):
     pass
 
 # Dependency to get database session
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency to get database session"""
     async with AsyncSessionLocal() as session:
         try:
