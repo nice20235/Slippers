@@ -161,4 +161,30 @@ class TokenResponse(BaseModel):
     user: UserResponse = Field(..., description="User information")
 
 class RefreshTokenRequest(BaseModel):
-    refresh_token: str = Field(..., description="JWT refresh token") 
+    refresh_token: str = Field(..., description="JWT refresh token")
+
+class ForgotPasswordRequest(BaseModel):
+    name: str = Field(
+        ..., 
+        description="User's login name", 
+        min_length=2, 
+        max_length=100,
+        example="John"
+    )
+    new_password: str = Field(
+        ..., 
+        description="New password", 
+        min_length=8,
+        example="newsecurepassword123"
+    )
+    confirm_new_password: str = Field(
+        ..., 
+        description="Confirm new password", 
+        example="newsecurepassword123"
+    )
+    
+    @validator('confirm_new_password')
+    def passwords_match(cls, v, values):
+        if 'new_password' in values and v != values['new_password']:
+            raise ValueError('New passwords do not match')
+        return v 

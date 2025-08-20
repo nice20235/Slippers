@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.auth.jwt import create_access_token, create_refresh_token, decode_refresh_token
-from app.crud.user import create_user, authenticate_user, get_user_by_name, get_user_by_phone_number, get_user
-from app.schemas.user import UserCreate, UserLogin, TokenResponse, RefreshTokenRequest, UserResponse
+from app.crud.user import create_user, authenticate_user, get_user_by_name, get_user_by_phone_number, get_user, update_user_password
+from app.schemas.user import UserCreate, UserLogin, TokenResponse, RefreshTokenRequest, UserResponse, ForgotPasswordRequest
 
 import logging
 import time
@@ -168,4 +168,40 @@ async def logout(response: Response):
     response.delete_cookie(key="access_token", domain=settings.COOKIE_DOMAIN)
     response.delete_cookie(key="refresh_token", domain=settings.COOKIE_DOMAIN)
     return {"message": "Logged out successfully"}
+
+
+@auth_router.post("/forgot-password")
+async def forgot_password(
+    forgot_data: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reset user password by username
+    """
+    # Check if user exists
+    user = await get_user_by_name(db, forgot_data.name)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User with this name not found"
+        )
+    
+    # Update password
+    updated_user = await update_user_password(db, forgot_data.name, forgot_data.new_password)
+    if not updated_user:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update password"
+        )
+    
+    logger.info(f"Password reset for user: {updated_user.name}")
+    return {
+        "message": "Password updated successfully",
+        "user": {
+            "name": updated_user.name,
+            "surname": updated_user.surname,
+            "phone_number": updated_user.phone_number,
+            "is_admin": updated_user.is_admin
+        }
+    }
 

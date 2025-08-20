@@ -135,4 +135,19 @@ async def promote_to_admin(db: AsyncSession, name: str) -> Optional[User]:
         .options(selectinload(User.orders))
         .where(User.id == user.id)
     )
-    return result.scalar_one() 
+    return result.scalar_one()
+
+async def update_user_password(db: AsyncSession, name: str, new_password: str) -> Optional[User]:
+    """Update user password by name"""
+    user = await get_user_by_name(db, name)
+    if not user:
+        return None
+    
+    # Store new password directly (no hashing as per your request)
+    user.password_hash = new_password
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    
+    logger.info(f"Password updated for user: {user.name}")
+    return user 
