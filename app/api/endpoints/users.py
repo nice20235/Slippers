@@ -122,17 +122,29 @@ async def update_user_endpoint(
         )
     logger.info(f"Admin {admin.name} updating user: {user.name} ({user.phone_number})")
 
-    # Prevent duplicate phone numbers
-    if user_update.phone_number and user_update.phone_number != user.phone_number:
-        existing = await get_user_by_phone_number(db, user_update.phone_number)
-        if existing and existing.id != user.id:
-            raise HTTPException(status_code=400, detail="Phone number already in use")
+    # Prevent duplicate phone numbers (only when phone provided and changed)
+    if 'phone_number' in user_update.model_dump(exclude_unset=True):
+        new_phone = (user_update.phone_number or '').strip()
+        if not new_phone:
+            # Treat empty string as not provided; don't overwrite existing phone
+            pass
+        elif new_phone != (user.phone_number or ''):
+            existing = await get_user_by_phone_number(db, new_phone)
+            if existing and existing.id != user.id:
+                raise HTTPException(status_code=400, detail="Phone number already in use")
 
     try:
-        updated_user = await update_user(db, user, user_update)
-    except IntegrityError:
+        # When phone_number was sent as empty, avoid overwriting by removing it
+        payload_admin = user_update.model_dump(exclude_unset=True)
+        if 'phone_number' in payload_admin and not (payload_admin.get('phone_number') or '').strip():
+            payload_admin.pop('phone_number', None)
+        updated_user = await update_user(db, user, UserUpdate(**payload_admin))
+    except IntegrityError as ie:
         await db.rollback()
-        raise HTTPException(status_code=400, detail="Phone number already in use")
+        msg = str(getattr(ie, 'orig', ie))
+        if 'phone_number' in msg or 'UNIQUE' in msg.upper():
+            raise HTTPException(status_code=400, detail="Phone number already in use")
+        raise HTTPException(status_code=400, detail="Update failed")
     
     # Clear cache after updating user
     from app.core.cache import invalidate_cache_pattern
@@ -203,17 +215,27 @@ async def update_own_profile(
     payload.pop("confirm_new_password", None)
     sanitized_update = UserUpdate(**payload)
 
-    # Prevent duplicate phone numbers
-    if sanitized_update.phone_number and sanitized_update.phone_number != current_user.phone_number:
-        existing = await get_user_by_phone_number(db, sanitized_update.phone_number)
-        if existing and existing.id != current_user.id:
-            raise HTTPException(status_code=400, detail="Phone number already in use")
+    # Prevent duplicate phone numbers (only when phone provided and changed)
+    if 'phone_number' in payload:
+        new_phone = (payload.get('phone_number') or '').strip()
+        if not new_phone:
+            # Don't overwrite existing phone with empty string
+            sanitized_payload = sanitized_update.model_dump(exclude_unset=True)
+            sanitized_payload.pop('phone_number', None)
+            sanitized_update = UserUpdate(**sanitized_payload)
+        elif new_phone != (current_user.phone_number or ''):
+            existing = await get_user_by_phone_number(db, new_phone)
+            if existing and existing.id != current_user.id:
+                raise HTTPException(status_code=400, detail="Phone number already in use")
 
     try:
         updated_user = await update_user(db, current_user, sanitized_update)
-    except IntegrityError:
+    except IntegrityError as ie:
         await db.rollback()
-        raise HTTPException(status_code=400, detail="Phone number already in use")
+        msg = str(getattr(ie, 'orig', ie))
+        if 'phone_number' in msg or 'UNIQUE' in msg.upper():
+            raise HTTPException(status_code=400, detail="Phone number already in use")
+        raise HTTPException(status_code=400, detail="Update failed")
 
     # Invalidate related caches
     from app.core.cache import invalidate_cache_pattern

@@ -136,7 +136,8 @@ app.add_middleware(
     allow_origins=allowed,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type"],
+    allow_headers=["Authorization", "Content-Type", "Refresh-Token", "Token-Type", "X-Expires-In"],
+    expose_headers=["Authorization", "Refresh-Token", "Token-Type", "X-Expires-In"],
 )
 
 # Performance middleware

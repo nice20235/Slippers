@@ -61,17 +61,12 @@ async def register_user(
     # Create tokens
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    # Set tokens as HttpOnly cookies (config-driven)
-    response.set_cookie(
-        key="access_token", value=access_token, httponly=True,
-        secure=settings.COOKIE_SECURE, samesite=settings.COOKIE_SAMESITE,
-        domain=settings.COOKIE_DOMAIN
-    )
-    response.set_cookie(
-        key="refresh_token", value=refresh_token, httponly=True,
-        secure=settings.COOKIE_SECURE, samesite=settings.COOKIE_SAMESITE,
-        domain=settings.COOKIE_DOMAIN
-    )
+    # Return tokens via response headers
+    if response is not None:
+        response.headers["Authorization"] = f"Bearer {access_token}"
+        response.headers["Refresh-Token"] = refresh_token
+        response.headers["Token-Type"] = "bearer"
+        response.headers["X-Expires-In"] = str(settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     user_payload = UserResponse.from_orm(user).dict()
     user_payload.pop("id", None)
     return {"message": "User registered successfully", "user": user_payload}
@@ -100,17 +95,12 @@ async def login_user(
     # Create tokens
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    # Set tokens as HttpOnly cookies (config-driven)
-    response.set_cookie(
-        key="access_token", value=access_token, httponly=True,
-        secure=settings.COOKIE_SECURE, samesite=settings.COOKIE_SAMESITE,
-        domain=settings.COOKIE_DOMAIN
-    )
-    response.set_cookie(
-        key="refresh_token", value=refresh_token, httponly=True,
-        secure=settings.COOKIE_SECURE, samesite=settings.COOKIE_SAMESITE,
-        domain=settings.COOKIE_DOMAIN
-    )
+    # Return tokens via response headers
+    if response is not None:
+        response.headers["Authorization"] = f"Bearer {access_token}"
+        response.headers["Refresh-Token"] = refresh_token
+        response.headers["Token-Type"] = "bearer"
+        response.headers["X-Expires-In"] = str(settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     logger.info(f"User logged in successfully: {user.name} (ID: {user.id})")
     user_payload = UserResponse.from_orm(user).dict()
     user_payload.pop("id", None)
@@ -144,29 +134,22 @@ async def refresh_token(
     # Create new tokens
     access_token = create_access_token(data={"sub": str(user.id)})
     refresh_token = create_refresh_token(data={"sub": str(user.id)})
-    # Set tokens as HttpOnly cookies (config-driven)
-    response.set_cookie(
-        key="access_token", value=access_token, httponly=True,
-        secure=settings.COOKIE_SECURE, samesite=settings.COOKIE_SAMESITE,
-        domain=settings.COOKIE_DOMAIN
-    )
-    response.set_cookie(
-        key="refresh_token", value=refresh_token, httponly=True,
-        secure=settings.COOKIE_SECURE, samesite=settings.COOKIE_SAMESITE,
-        domain=settings.COOKIE_DOMAIN
-    )
+    # Return tokens via response headers
+    if response is not None:
+        response.headers["Authorization"] = f"Bearer {access_token}"
+        response.headers["Refresh-Token"] = refresh_token
+        response.headers["Token-Type"] = "bearer"
+        response.headers["X-Expires-In"] = str(settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     logger.info(f"Token refreshed for user: {user.name} (ID: {user.id})")
     user_payload = UserResponse.from_orm(user).dict()
     user_payload.pop("id", None)
     return {"message": "Token refreshed", "user": user_payload}
 
 @auth_router.post("/logout")
-async def logout(response: Response):
+async def logout():
     """
-    Logout user by clearing auth cookies
+    Logout endpoint (no cookies to clear). Client should discard tokens stored on the frontend.
     """
-    response.delete_cookie(key="access_token", domain=settings.COOKIE_DOMAIN)
-    response.delete_cookie(key="refresh_token", domain=settings.COOKIE_DOMAIN)
     return {"message": "Logged out successfully"}
 
 
