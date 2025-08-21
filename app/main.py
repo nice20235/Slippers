@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
@@ -209,6 +210,10 @@ app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(categories.router, prefix="/categories", tags=["Categories"])
 app.include_router(slippers.router, prefix="/slippers", tags=["Slippers"])
 app.include_router(orders.router, prefix="/orders", tags=["Orders"])
+
+# Serve static files (images, etc.)
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # Root endpoint
 @app.get("/", tags=["Root"])
