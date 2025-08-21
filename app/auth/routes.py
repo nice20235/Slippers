@@ -69,7 +69,13 @@ async def register_user(
         response.headers["X-Expires-In"] = str(settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     user_payload = UserResponse.from_orm(user).dict()
     user_payload.pop("id", None)
-    return {"message": "User registered successfully", "user": user_payload}
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+        "user": user_payload,
+    }
 
 
 @auth_router.post("/login")
@@ -104,7 +110,13 @@ async def login_user(
     logger.info(f"User logged in successfully: {user.name} (ID: {user.id})")
     user_payload = UserResponse.from_orm(user).dict()
     user_payload.pop("id", None)
-    return {"message": "Login successful", "user": user_payload}
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+        "user": user_payload,
+    }
 
 
 @auth_router.post("/refresh")
@@ -143,7 +155,13 @@ async def refresh_token(
     logger.info(f"Token refreshed for user: {user.name} (ID: {user.id})")
     user_payload = UserResponse.from_orm(user).dict()
     user_payload.pop("id", None)
-    return {"message": "Token refreshed", "user": user_payload}
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+        "user": user_payload,
+    }
 
 @auth_router.post("/logout")
 async def logout():
