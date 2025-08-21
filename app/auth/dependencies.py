@@ -1,5 +1,4 @@
 from fastapi import Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
@@ -11,10 +10,7 @@ import logging
 # Set up logging
 logger = logging.getLogger(__name__)
 
-# OAuth2 scheme for JWT tokens
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login", auto_error=False)
-
-async def get_current_user(request: Request, token: str | None = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
+async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> User:
     """Get current authenticated user from JWT token"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -23,9 +19,19 @@ async def get_current_user(request: Request, token: str | None = Depends(oauth2_
     )
     
     try:
-        # Try HttpOnly cookie first, then Bearer token
-        cookie_token = request.cookies.get("access_token")
-        token_to_use = cookie_token or token
+        # Prefer Authorization header (Bearer ...) over legacy cookies
+        header_auth = request.headers.get("Authorization") or request.headers.get("authorization")
+        header_token = None
+        if header_auth:
+            parts = header_auth.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                header_token = parts[1].strip()
+            elif len(parts) == 1:
+                # Non-standard: token provided without scheme
+                header_token = parts[0].strip()
+
+        # Only Authorization header is supported now
+        token_to_use = header_token
         if not token_to_use:
             raise credentials_exception
 
