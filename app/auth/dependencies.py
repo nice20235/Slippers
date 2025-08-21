@@ -6,7 +6,6 @@ from app.db.database import get_db
 from app.auth.jwt import decode_access_token
 from app.models.user import User
 from app.crud.user import get_user
-from sqlalchemy.future import select
 import logging
 
 # Set up logging

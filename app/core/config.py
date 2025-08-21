@@ -1,7 +1,7 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost/restaurant"
+    DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost/slippers"
     SECRET_KEY: str = "supersecretkey"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_SEC: int = 60  # окно, секунд
     RATE_LIMIT_EXCLUDE_PATHS: str = "/docs,/redoc,/openapi.json,/favicon.ico,/static"
     TRUST_PROXY: bool = False  # если True, брать IP из X-Forwarded-For
+    DEBUG: bool = True  # для разработки
 
     class Config:
         env_file = ".env"

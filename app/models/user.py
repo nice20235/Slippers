@@ -37,6 +37,9 @@ class User(Base):
         Index('idx_users_surname', 'surname'),
         Index('idx_users_phone_number', 'phone_number'),
         Index('idx_users_admin', 'is_admin'),
+        Index('idx_users_created_at', 'created_at'),
+        Index('idx_users_name_surname', 'name', 'surname'),  # Composite for full name search
+        Index('idx_users_admin_created', 'is_admin', 'created_at'),  # For admin queries with date
     )
     
     def __repr__(self):

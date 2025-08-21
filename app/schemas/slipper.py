@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
 from .category import CategoryBase, CategoryCreate, CategoryUpdate, CategoryInDB
+from .slipper_image import SlipperImageResponse
 
 
 # Slipper schemas
@@ -66,6 +67,7 @@ class SlipperInDB(SlipperBase):
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     category: Optional[CategoryInDB] = Field(None, description="Associated category")
+    images: List[SlipperImageResponse] = Field(default=[], description="Slipper images")
 
     class Config:
         from_attributes = True

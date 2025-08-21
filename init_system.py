@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Restaurant Order System - Complete Initialization Script
+Slippers Order System - Complete Initialization Script
 This script sets up the entire system including database, sample data, and admin user.
 """
 
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -13,12 +12,12 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 
 from app.db.database import init_db, AsyncSessionLocal
-from app.models.user import User
-from app.models.food import Category, Slipper
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud.user import create_user, promote_to_admin
 from app.crud.food import create_category, create_food
 from app.schemas.user import UserCreate
-from app.schemas.slipper import CategoryCreate, SlipperCreate as FoodCreate
+from app.schemas.category import CategoryCreate
+from app.schemas.slipper import SlipperCreate as FoodCreate
 
 # Sample data
 SAMPLE_CATEGORIES = [
@@ -35,7 +34,7 @@ SAMPLE_FOODS = [
     {"image": "https://example.com/slippers/kids1.jpg", "name": "Kids Fun Slipper", "size": "30", "price": 14.99, "quantity": 40, "category_name": "Kids"},
 ]
 
-async def create_sample_categories(db: AsyncSessionLocal):
+async def create_sample_categories(db: AsyncSession):
     """Create sample categories"""
     print("📂 Creating sample categories...")
     categories = {}
@@ -48,7 +47,7 @@ async def create_sample_categories(db: AsyncSessionLocal):
     
     return categories
 
-async def create_sample_foods(db: AsyncSessionLocal, categories):
+async def create_sample_foods(db: AsyncSession, categories):
     """Create sample foods"""
     print("👟 Creating sample slippers...")
     
@@ -64,7 +63,7 @@ async def create_sample_foods(db: AsyncSessionLocal, categories):
         else:
             print(f"  ⚠️  Category '{category_name}' not found for slipper: {food_data['name']}")
 
-async def create_admin_user(db: AsyncSessionLocal):
+async def create_admin_user(db: AsyncSession):
     """Create default admin user"""
     print("👤 Creating admin user...")
     
@@ -105,7 +104,7 @@ async def create_admin_user(db: AsyncSessionLocal):
 
 async def main():
     """Main initialization function"""
-    print("🚀 Initializing Restaurant Order System...")
+    print("🚀 Initializing Slippers Order System...")
     print("=" * 50)
     
     try:
@@ -128,7 +127,7 @@ async def main():
         print("\n" + "=" * 50)
         print("✅ System initialization completed successfully!")
         print("\n📋 Summary:")
-        print(f"  • Database: restaurant.db")
+        print(f"  • Database: slippers.db")
         print(f"  • Categories: {len(categories)}")
         print(f"  • Slippers: {len(SAMPLE_FOODS)}")
         if admin_user:
@@ -140,8 +139,8 @@ async def main():
         print("  1. Start the FastAPI server: python -m uvicorn app.main:app --reload")
         print("  2. Access the API documentation: http://localhost:8000/docs")
         print("  3. Login with admin credentials:")
-        print(f"     • Name: {admin_name}")
-        print(f"     • Password: {admin_password}")
+        print("     • Name: Admin")
+        print("     • Password: admin123")
         print("  4. Test the authentication system")
         
     except Exception as e:

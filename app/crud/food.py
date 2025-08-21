@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from app.models.food import Slipper as Food, Category
 from app.schemas.slipper import SlipperCreate as FoodCreate, SlipperUpdate as FoodUpdate

@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Optional
 from app.db.database import get_db
 from app.schemas.order import OrderInDB, OrderCreate, OrderUpdate
+from app.models.order import OrderStatus
 from app.crud.order import get_orders, get_user_orders, get_order, create_order, update_order, delete_order
 from app.auth.dependencies import get_current_user, get_current_admin
-
+from app.core.cache import cached
 import logging
 
 # Set up logging
@@ -20,21 +22,91 @@ async def create_order_endpoint(order: OrderCreate, db: AsyncSession = Depends(g
     logger.info(f"Creating order for user: {user.name} (Admin: {user.is_admin})")
     # Set the user_id from the authenticated user
     order.user_id = user.id
-    return await create_order(db, order)
+    new_order = await create_order(db, order)
+    
+    # Clear cache after creating order
+    from app.core.cache import invalidate_cache_pattern
+    await invalidate_cache_pattern("orders:")
+    
+    return new_order
 
-@router.get("/", response_model=list[OrderInDB])
-async def list_orders(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+@router.get("/")
+@cached(ttl=60, key_prefix="orders")
+async def list_orders(
+    skip: int = Query(0, ge=0, description="Skip items for pagination"),
+    limit: int = Query(20, ge=1, le=100, description="Limit items per page"),
+    status: Optional[OrderStatus] = Query(None, description="Filter by order status"),
+    db: AsyncSession = Depends(get_db), 
+    user=Depends(get_current_user)
+):
     """
-    List orders. Admins can see all orders, users can only see their own orders.
+    List orders with pagination and filtering.
+    Admins can see all orders, users can only see their own orders.
+    Optimized with concurrent queries.
     """
-    if user.is_admin:
-        logger.info(f"Admin {user.name} listing all orders")
-        orders, total = await get_orders(db)
-        return orders
-    else:
-        logger.info(f"User {user.name} listing their own orders")
-        orders, total = await get_user_orders(db, user.id)
-        return orders
+    try:
+        if user.is_admin:
+            logger.info(f"Admin {user.name} listing orders (skip={skip}, limit={limit})")
+            orders, total = await get_orders(
+                db, skip=skip, limit=limit, status=status, load_relationships=False
+            )
+        else:
+            logger.info(f"User {user.name} listing their own orders")
+            orders, total = await get_orders(
+                db, skip=skip, limit=limit, user_id=user.id, status=status, load_relationships=False
+            )
+        
+        # Optimized response structure
+        items = []
+        for order in orders:
+            items.append({
+                "id": order.id,
+                "user_id": order.user_id,
+                "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
+                "status": order.status.value,
+                "total_amount": order.total_amount,
+                "created_at": order.created_at.isoformat(),
+                "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+            })
+        
+        return {
+            "items": items,
+            "total": total,
+            "page": (skip // limit) + 1,
+            "pages": (total + limit - 1) // limit,
+            "has_next": skip + limit < total,
+            "has_prev": skip > 0
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching orders: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching orders")
+
+@router.get("/{order_id}", response_model=OrderInDB)
+@cached(ttl=300, key_prefix="order")
+async def get_order_endpoint(
+    order_id: int, 
+    db: AsyncSession = Depends(get_db), 
+    user=Depends(get_current_user)
+):
+    """Get a specific order by ID"""
+    try:
+        db_order = await get_order(db, order_id, load_relationships=True)
+        if not db_order:
+            raise HTTPException(status_code=404, detail="Order not found")
+        
+        # Check permissions
+        if not user.is_admin and db_order.user_id != user.id:
+            logger.warning(f"User {user.name} attempted to access order {order_id} belonging to user {db_order.user_id}")
+            raise HTTPException(status_code=403, detail="Not authorized to access this order")
+        
+        return db_order
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching order {order_id}: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching order")
 
 @router.put("/{order_id}", response_model=OrderInDB)
 async def update_order_endpoint(order_id: int, order_update: OrderUpdate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
@@ -54,7 +126,14 @@ async def update_order_endpoint(order_id: int, order_update: OrderUpdate, db: As
         )
     
     logger.info(f"Updating order {order_id} by user: {user.name} (Admin: {user.is_admin})")
-    return await update_order(db, db_order, order_update)
+    updated_order = await update_order(db, db_order, order_update)
+    
+    # Clear cache after updating order
+    from app.core.cache import invalidate_cache_pattern
+    await invalidate_cache_pattern("orders:")
+    await invalidate_cache_pattern(f"order:{order_id}:")
+    
+    return updated_order
 
 @router.delete("/{order_id}")
 async def delete_order_endpoint(order_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
@@ -75,4 +154,10 @@ async def delete_order_endpoint(order_id: int, db: AsyncSession = Depends(get_db
     
     logger.info(f"Deleting order {order_id} by user: {user.name} (Admin: {user.is_admin})")
     await delete_order(db, db_order)
+    
+    # Clear cache after deleting order
+    from app.core.cache import invalidate_cache_pattern
+    await invalidate_cache_pattern("orders:")
+    await invalidate_cache_pattern(f"order:{order_id}:")
+    
     return {"msg": "Order deleted"} 

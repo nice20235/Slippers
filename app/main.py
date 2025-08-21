@@ -1,103 +1,133 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from app.core.config import settings
-from fastapi.responses import JSONResponse
-import time
-from collections import defaultdict, deque
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 import os
+import logging
+import time
+from datetime import datetime
+from dotenv import load_dotenv
 
+from app.core.config import settings
+from app.core.middleware import PerformanceMiddleware, CompressionHeaderMiddleware, SecurityHeadersMiddleware
+from app.core.cache import cache
 from app.db.database import init_db, close_db
 from app.api.endpoints import users, slippers, orders, categories
 from app.auth.routes import auth_router
-from dotenv import load_dotenv
+from app.schemas.responses import HealthCheckResponse, ErrorResponse
+
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO if settings.DEBUG else logging.WARNING,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Application lifespan manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application startup and shutdown"""
+    """Manage application startup and shutdown with optimizations"""
     # Startup
-    print("🚀 Starting Restaurant Order System...")
-    await init_db()
-    print("✅ Application started successfully!")
+    logger.info("🚀 Starting Slippers Order System...")
+    
+    try:
+        # Initialize database
+        await init_db()
+        logger.info("✅ Database initialized")
+        
+        # Initialize cache
+        await cache.clear()  # Start with clean cache
+        logger.info("✅ Cache initialized")
+        
+        # Warm up critical cache entries if needed
+        # await warm_up_cache()
+        
+        logger.info("✅ Application started successfully!")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to start application: {e}")
+        raise
     
     yield
     
     # Shutdown
-    print("🛑 Shutting down...")
-    await close_db()
-    print("✅ Application shutdown complete!")
+    logger.info("🛑 Shutting down...")
+    
+    try:
+        # Clean up cache
+        await cache.clear()
+        logger.info("✅ Cache cleared")
+        
+        # Close database connections
+        await close_db()
+        logger.info("✅ Database connections closed")
+        
+        logger.info("✅ Application shutdown complete!")
+        
+    except Exception as e:
+        logger.error(f"❌ Error during shutdown: {e}")
 
-# Create FastAPI application
+# Create FastAPI application with optimizations
 app = FastAPI(
-    title="Restaurant Order System API",
+    title="Slippers Order System API",
     description="""
-    A modern restaurant ordering system with JWT-based authentication.
+    A high-performance slippers ordering system with comprehensive features.
     
-    ## Authentication
+    ## 🔐 Authentication
     
-    1. Register a new user: `POST /auth/register`
-    2. Login with credentials: `POST /auth/login`
-    3. Use the JWT token in Authorization header: `Bearer <token>`
-    4. Refresh tokens when needed: `POST /auth/refresh`
+    1. **Register**: `POST /auth/register` - Create new user account
+    2. **Login**: `POST /auth/login` - Get JWT tokens in secure cookies
+    3. **Refresh**: `POST /auth/refresh` - Refresh access token
+    4. **Logout**: `POST /auth/logout` - Clear authentication cookies
+    5. **Forgot Password**: `POST /auth/forgot-password` - Reset password
     
-    ## Features
+    ## 🏪 Features
     
-    * **JWT-based authentication** with access and refresh tokens
-    * **Role-based access** (User/Admin)
-    * **Slipper management** with categories
-    * **Order processing** system
-    * **User management** (Admin only)
+    * **JWT-based authentication** with HttpOnly cookies
+    * **Role-based access control** (User/Admin)
+    * **Rate limiting** and security headers
+    * **Comprehensive slipper management** with multiple images
+    * **Order tracking system** with status updates
+    * **Pagination and filtering** on all list endpoints
+    * **Caching system** for improved performance
+    * **File upload support** for slipper images
+    * **Analytics endpoints** for admin dashboard
     
-    ## Usage
+    ## 🚀 Performance
     
-    For all protected endpoints, include the Authorization header:
-    ```
-    Authorization: Bearer <your_jwt_token>
-    ```
+    * **Async database operations** with connection pooling
+    * **Redis-like caching** with TTL support
+    * **Optimized queries** with pagination and filtering
+    * **Response compression** for large payloads
+    * **Performance monitoring** headers
+    
+    ## 📊 API Structure
+    
+    * `/auth/*` - Authentication endpoints
+    * `/users/*` - User management (admin)
+    * `/slippers/*` - Slipper catalog and images
+    * `/orders/*` - Order management
+    * `/categories/*` - Product categories
     """,
-    version="1.0.0",
-    contact={
-        "name": "Restaurant Order System",
-        "url": "https://example.com",
-        "email": "support@example.com",
-    },
-    license_info={
-        "name": "MIT",
-    },
-    docs_url="/docs",
-    redoc_url="/redoc",
+    version="2.0.0",
     lifespan=lifespan,
+    # Optimize OpenAPI generation
     openapi_tags=[
-        {
-            "name": "Authentication",
-            "description": "JWT-based authentication system"
-        },
-        {
-            "name": "Users",
-            "description": "User management operations (Admin only)"
-        },
-        {
-            "name": "Categories",
-            "description": "Slipper category management"
-        },
-        {
-            "name": "Slippers",
-            "description": "Slipper item management"
-        },
-        {
-            "name": "Orders",
-            "description": "Order management operations"
-        },
-        {
-            "name": "Root",
-            "description": "Basic API information"
-        }
-    ]
-)
-
+        {"name": "Authentication", "description": "User authentication and authorization"},
+        {"name": "Users", "description": "User management (admin only)"},
+        {"name": "Slippers", "description": "Slipper catalog and image management"},
+        {"name": "Orders", "description": "Order processing and tracking"},
+        {"name": "Categories", "description": "Product category management"},
+        {"name": "System", "description": "System health and monitoring"},
+    ],
+    # Enable docs for development
+    docs_url="/docs",
+    redoc_url="/redoc", 
+    openapi_url="/openapi.json")
 # CORS middleware configuration
 allowed = [o.strip() for o in settings.ALLOWED_ORIGINS.split(',') if o.strip()]
 app.add_middleware(
@@ -108,7 +138,17 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# Simple global rate limiting middleware (IP-based)
+# Performance middleware
+app.add_middleware(PerformanceMiddleware)
+app.add_middleware(CompressionHeaderMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+
+# GZip compression for responses > 1KB
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Simple global rate limiting middleware (IP-based) - keeping existing implementation
+from collections import defaultdict, deque
+import time
 _req_log = defaultdict(deque)
 _exclude = {p.strip() for p in settings.RATE_LIMIT_EXCLUDE_PATHS.split(',') if p.strip()}
 
@@ -173,10 +213,25 @@ app.include_router(orders.router, prefix="/orders", tags=["Orders"])
 # Root endpoint
 @app.get("/", tags=["Root"])
 async def root():
-
+    """Root endpoint with welcome message and basic API info"""
     return {
-        "message": "Welcome to Restaurant Order System",
+        "message": "🥿 Slippers Order System API",
+        "version": "2.0.0",
+        "docs": "/docs",
+        "status": "operational"
     }
+
+# Health check endpoint  
+@app.get("/health", tags=["System"], response_model=HealthCheckResponse)
+async def health_check():
+    """Health check endpoint for monitoring"""
+    return HealthCheckResponse(
+        status="healthy",
+        timestamp=datetime.utcnow(),
+        version="2.0.0",
+        database=True,
+        cache=True
+    )
 
 if __name__ == "__main__":
     uvicorn.run(

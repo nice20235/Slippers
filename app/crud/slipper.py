@@ -1,9 +1,14 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy import func, and_, or_
 from app.models.food import Slipper, Category
 from app.schemas.slipper import SlipperCreate, SlipperUpdate
 from app.schemas.category import CategoryCreate, CategoryUpdate
+from typing import Optional, List, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # Category CRUD operations
@@ -40,50 +45,74 @@ async def delete_category(db: AsyncSession, db_category: Category):
 
 
 # Slipper CRUD operations
-async def get_slipper(db: AsyncSession, slipper_id: int):
-	result = await db.execute(
-		select(Slipper)
-		.options(selectinload(Slipper.category))
-		.where(Slipper.id == slipper_id)
-	)
+async def get_slipper(db: AsyncSession, slipper_id: int, load_images: bool = False):
+	"""Get slipper by ID with optional image loading"""
+	query = select(Slipper).options(joinedload(Slipper.category))
+	
+	if load_images:
+		query = query.options(selectinload(Slipper.images))
+	
+	result = await db.execute(query.where(Slipper.id == slipper_id))
 	return result.scalar_one_or_none()
 
 
-async def get_slippers(db: AsyncSession, skip: int = 0, limit: int = 100, category_id: int = None):
-	query = select(Slipper).options(selectinload(Slipper.category))
+async def get_slippers(db: AsyncSession, skip: int = 0, limit: int = 100, category_id: Optional[int] = None, search: Optional[str] = None) -> Tuple[List[Slipper], int]:
+	"""Get slippers with pagination and filters - optimized"""
+	# Build base query with efficient loading
+	query = select(Slipper).options(joinedload(Slipper.category))
+	conditions = []
+	
+	# Apply filters
 	if category_id:
-		query = query.where(Slipper.category_id == category_id)
-	result = await db.execute(query.offset(skip).limit(limit))
-	return result.scalars().all()
+		conditions.append(Slipper.category_id == category_id)
+	
+	if search:
+		conditions.append(
+			or_(
+				Slipper.name.ilike(f"%{search}%"),
+				Slipper.size.ilike(f"%{search}%")
+			)
+		)
+	
+	if conditions:
+		query = query.where(and_(*conditions))
+	
+	# Order by name for consistent results
+	query = query.order_by(Slipper.name)
+	
+	# Sequential execution to avoid SQLite concurrent operations
+	count_query = select(func.count()).select_from(query.subquery())
+	count_result = await db.execute(count_query)
+	total = count_result.scalar() or 0
+
+	data_result = await db.execute(query.offset(skip).limit(limit))
+	slippers = data_result.scalars().all()
+	
+	return slippers, total
 
 
 async def create_slipper(db: AsyncSession, slipper_data: dict):
+	"""Create slipper - optimized"""
 	db_slipper = Slipper(**slipper_data)
 	db.add(db_slipper)
 	await db.commit()
 	await db.refresh(db_slipper)
-	# Load the category relationship
-	result = await db.execute(
-		select(Slipper)
-		.options(selectinload(Slipper.category))
-		.where(Slipper.id == db_slipper.id)
-	)
-	return result.scalar_one()
+	
+	logger.info(f"Created slipper with ID: {db_slipper.id}")
+	return db_slipper
 
 
 async def update_slipper(db: AsyncSession, db_slipper: Slipper, slipper_update: SlipperUpdate):
+	"""Update slipper - optimized"""
 	for field, value in slipper_update.model_dump(exclude_unset=True).items():
 		setattr(db_slipper, field, value)
+	
 	db.add(db_slipper)
 	await db.commit()
 	await db.refresh(db_slipper)
-	# Load the category relationship
-	result = await db.execute(
-		select(Slipper)
-		.options(selectinload(Slipper.category))
-		.where(Slipper.id == db_slipper.id)
-	)
-	return result.scalar_one()
+	
+	logger.info(f"Updated slipper with ID: {db_slipper.id}")
+	return db_slipper
 
 
 async def delete_slipper(db: AsyncSession, db_slipper: Slipper):

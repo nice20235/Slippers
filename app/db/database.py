@@ -1,31 +1,58 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import StaticPool, QueuePool
+from sqlalchemy import event
 from typing import AsyncGenerator
 import os
+import logging
+from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 # Database URL - use SQLite for development, can be changed to PostgreSQL for production
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./restaurant.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./slippers.db")
 
 # Create async engine with optimized settings
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,  # Set to True for SQL debugging
-    poolclass=StaticPool,  # Better for SQLite
-    pool_pre_ping=True,  # Verify connections before use
-    pool_recycle=3600,  # Recycle connections every hour
-    connect_args={
-        "check_same_thread": False,  # Required for SQLite async
-    } if "sqlite" in DATABASE_URL else {}
-)
+if "sqlite" in DATABASE_URL:
+    # SQLite-specific optimizations
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=False,  # Set to True for SQL debugging
+        poolclass=StaticPool,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        connect_args={
+            "check_same_thread": False,
+            "timeout": 30,  # Increased timeout
+            "isolation_level": None,
+        }
+    )
+else:
+    # PostgreSQL/MySQL optimizations
+    engine = create_async_engine(
+        DATABASE_URL,
+        echo=False,
+        poolclass=QueuePool,
+        pool_size=20,
+        max_overflow=30,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        pool_timeout=30,
+        connect_args={
+            "command_timeout": 60,
+            "server_settings": {
+                "jit": "off",
+            }
+        }
+    )
 
-# Create async session factory
+# Create async session factory with optimizations
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
-    expire_on_commit=False,  # Prevent expired object access issues
+    expire_on_commit=False,  # Better for async operations
     autocommit=False,
-    autoflush=False,
+    autoflush=False,  # Manual control over when to flush
 )
 
 # Base class for all models
@@ -34,15 +61,20 @@ class Base(DeclarativeBase):
 
 # Dependency to get database session
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency to get database session"""
+    """Optimized dependency to get database session"""
     async with AsyncSessionLocal() as session:
         try:
             yield session
-        except Exception:
+        except HTTPException:
+            # Expected API error paths: rollback without noisy error logs
             await session.rollback()
             raise
-        finally:
-            await session.close()
+        except Exception as e:
+            await session.rollback()
+            # Log full stack trace and exception details for unexpected errors
+            logger.exception("Database session error")
+            raise
+        # Do not call session.close() here: context manager handles it
 
 # Initialize database tables
 async def init_db():
@@ -50,7 +82,7 @@ async def init_db():
     async with engine.begin() as conn:
         # Import all models to ensure they're registered
         from app.models.user import User
-        from app.models.food import Slipper, Category
+        from app.models.food import Slipper, Category, SlipperImage
         from app.models.order import Order, OrderItem
         
         # Create all tables

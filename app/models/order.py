@@ -3,6 +3,11 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.database import Base
 from datetime import datetime
 import enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from app.models.user import User
+    from app.models.food import Slipper
 
 class OrderStatus(str, enum.Enum):
     PENDING = "pending"
@@ -46,11 +51,17 @@ class Order(Base):
     user: Mapped["User"] = relationship("User", back_populates="orders")
     items: Mapped[list["OrderItem"]] = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
     
-    # Indexes for better query performance
+    # Indexes for better query performance  
     __table_args__ = (
         Index('idx_orders_user', 'user_id'),
         Index('idx_orders_status', 'status'),
         Index('idx_orders_created', 'created_at'),
+        Index('idx_orders_updated', 'updated_at'),
+        # Composite indexes for common queries
+        Index('idx_orders_user_status', 'user_id', 'status'),
+        Index('idx_orders_user_created', 'user_id', 'created_at'),
+        Index('idx_orders_status_created', 'status', 'created_at'),
+        Index('idx_orders_total_amount', 'total_amount'),  # For analytics
     )
     
     def __repr__(self):
@@ -90,6 +101,8 @@ class OrderItem(Base):
     __table_args__ = (
         Index('idx_order_items_order', 'order_id'),
         Index('idx_order_items_slipper', 'slipper_id'),
+        # Composite index for order item queries
+        Index('idx_order_items_order_slipper', 'order_id', 'slipper_id'),
     )
     
     def __repr__(self):

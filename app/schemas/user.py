@@ -188,3 +188,68 @@ class ForgotPasswordRequest(BaseModel):
         if 'new_password' in values and v != values['new_password']:
             raise ValueError('New passwords do not match')
         return v 
+
+
+class UserSelfUpdate(UserUpdate):
+    """Schema for self-profile update including optional password change"""
+    current_password: Optional[str] = Field(
+        None,
+        description="Current password (required when changing password)",
+        example="oldpassword123"
+    )
+    new_password: Optional[str] = Field(
+        None,
+        description="New password (min 8 chars)",
+        min_length=8,
+        example="newsecurepassword123"
+    )
+    confirm_new_password: Optional[str] = Field(
+        None,
+        description="Confirm new password",
+        example="newsecurepassword123"
+    )
+
+    @validator('confirm_new_password')
+    def self_passwords_match(cls, v, values):
+        # Only validate when changing password
+        if values.get('new_password') is not None:
+            if v != values.get('new_password'):
+                raise ValueError('New passwords do not match')
+        return v
+
+    @validator('current_password')
+    def require_current_when_changing(cls, v, values):
+        # If changing password, current_password must be provided
+        if values.get('new_password') is not None and not v:
+            raise ValueError('Current password is required to change password')
+        return v
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "John",
+                "surname": "Doe",
+                "phone_number": "+79991234567",
+                "current_password": "oldpassword123",
+                "new_password": "newsecurepassword123",
+                "confirm_new_password": "newsecurepassword123"
+            }
+        }
+
+
+class UserProfileResponse(BaseModel):
+    """Public user profile returned by /users/me endpoints"""
+    name: str
+    surname: str
+    phone_number: str
+    is_admin: bool = False
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "John",
+                "surname": "Doe",
+                "phone_number": "+79991234567",
+                "is_admin": False
+            }
+        }

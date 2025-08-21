@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from sqlalchemy import func
+from sqlalchemy import func, and_, or_
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 from app.auth.password import verify_password
@@ -10,39 +10,36 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-async def get_user(db: AsyncSession, user_id: int) -> Optional[User]:
-    """Get user by ID"""
-    result = await db.execute(
-        select(User)
-        .options(selectinload(User.orders))
-        .where(User.id == user_id)
-    )
+async def get_user(db: AsyncSession, user_id: int, load_orders: bool = False) -> Optional[User]:
+    """Get user by ID with optional order loading"""
+    query = select(User).where(User.id == user_id)
+    if load_orders:
+        query = query.options(selectinload(User.orders))
+    result = await db.execute(query)
     return result.scalar_one_or_none()
 
-async def get_user_by_name(db: AsyncSession, name: str) -> Optional[User]:
-    """Get user by name"""
-    result = await db.execute(
-        select(User)
-        .options(selectinload(User.orders))
-        .where(User.name == name)
-    )
+async def get_user_by_name(db: AsyncSession, name: str, load_orders: bool = False) -> Optional[User]:
+    """Get user by name with optional order loading"""
+    query = select(User).where(User.name == name)
+    if load_orders:
+        query = query.options(selectinload(User.orders))
+    result = await db.execute(query)
     return result.scalar_one_or_none()
 
 async def get_user_by_phone_number(db: AsyncSession, phone_number: str) -> Optional[User]:
-    """Get user by phone number"""
+    """Get user by phone number - optimized for authentication"""
     result = await db.execute(
-        select(User)
-        .options(selectinload(User.orders))
-        .where(User.phone_number == phone_number)
+        select(User).where(User.phone_number == phone_number)
     )
     return result.scalar_one_or_none()
 
 async def authenticate_user(db: AsyncSession, name: str, password: str) -> Optional[User]:
-    """Authenticate user by name and password"""
-    user = await get_user_by_name(db, name)
-    if not user:
-        return None
-    if not verify_password(password, user.password_hash):
+    """Authenticate user by name and password - optimized query"""
+    result = await db.execute(
+        select(User).where(User.name == name)
+    )
+    user = result.scalar_one_or_none()
+    if not user or not verify_password(password, user.password_hash):
         return None
     return user
 
@@ -50,33 +47,48 @@ async def get_users(
     db: AsyncSession, 
     skip: int = 0, 
     limit: int = 100,
-    is_admin: Optional[bool] = None
+    is_admin: Optional[bool] = None,
+    search: Optional[str] = None
 ) -> Tuple[List[User], int]:
-    """Get users with pagination and filters"""
-    # Build query
-    query = select(User).options(selectinload(User.orders))
+    """Get users with pagination and filters - optimized"""
+    # Build base query without loading orders for list view
+    query = select(User)
+    conditions = []
     
     # Apply filters
     if is_admin is not None:
-        query = query.where(User.is_admin == is_admin)
+        conditions.append(User.is_admin == is_admin)
     
-    # Get total count
+    if search:
+        conditions.append(
+            or_(
+                User.name.ilike(f"%{search}%"),
+                User.surname.ilike(f"%{search}%"),
+                User.phone_number.ilike(f"%{search}%")
+            )
+        )
+    
+    if conditions:
+        query = query.where(and_(*conditions))
+    
+    # Order by created_at for consistent results
+    query = query.order_by(User.created_at.desc())
+    
+    # Sequential execution to avoid SQLite concurrent operations
     count_query = select(func.count()).select_from(query.subquery())
-    total_result = await db.execute(count_query)
-    total = total_result.scalar()
-    
-    # Get paginated results
-    result = await db.execute(query.offset(skip).limit(limit))
-    users = result.scalars().all()
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    data_result = await db.execute(query.offset(skip).limit(limit))
+    users = data_result.scalars().all()
     
     return users, total
 
 async def create_user(db: AsyncSession, user: UserCreate) -> User:
-    """Create new user"""
-    # Get user data without hashing password
+    """Create new user - optimized"""
     user_data = user.model_dump()
     password = user_data.pop('password')
-    user_data.pop('confirm_password', None)  # Remove confirm_password as it's not stored
+    user_data.pop('confirm_password', None)
     
     # Store password directly (no hashing)
     user_data['password_hash'] = password
@@ -86,13 +98,8 @@ async def create_user(db: AsyncSession, user: UserCreate) -> User:
     await db.commit()
     await db.refresh(db_user)
     
-    # Load relationships
-    result = await db.execute(
-        select(User)
-        .options(selectinload(User.orders))
-        .where(User.id == db_user.id)
-    )
-    return result.scalar_one()
+    logger.info(f"Created user with ID: {db_user.id}")
+    return db_user
 
 async def update_user(db: AsyncSession, db_user: User, user_update: UserUpdate) -> User:
     """Update user"""

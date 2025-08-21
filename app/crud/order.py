@@ -1,22 +1,26 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-from sqlalchemy import func
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload, joinedload
+from sqlalchemy import func, and_, or_
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.food import Slipper
 from app.schemas.order import OrderCreate, OrderUpdate, OrderItemCreate
 from typing import Optional, List, Tuple
+import logging
 
-async def get_order(db: AsyncSession, order_id: int) -> Optional[Order]:
-    """Get order by ID with all relationships"""
-    result = await db.execute(
-        select(Order)
-        .options(
-            selectinload(Order.user),
+logger = logging.getLogger(__name__)
+
+async def get_order(db: AsyncSession, order_id: int, load_relationships: bool = True) -> Optional[Order]:
+    """Get order by ID with optional relationship loading"""
+    query = select(Order).where(Order.id == order_id)
+    
+    if load_relationships:
+        query = query.options(
+            joinedload(Order.user),
             selectinload(Order.items).selectinload(OrderItem.slipper)
         )
-        .where(Order.id == order_id)
-    )
+    
+    result = await db.execute(query)
     return result.scalar_one_or_none()
 
 async def get_orders(
@@ -24,29 +28,40 @@ async def get_orders(
     skip: int = 0,
     limit: int = 100,
     user_id: Optional[int] = None,
-    status: Optional[OrderStatus] = None
+    status: Optional[OrderStatus] = None,
+    load_relationships: bool = True
 ) -> Tuple[List[Order], int]:
-    """Get orders with pagination and filters"""
-    # Build query
-    query = select(Order).options(
-        selectinload(Order.user),
-        selectinload(Order.items).selectinload(OrderItem.slipper)
-    )
+    """Get orders with pagination and filters - optimized"""
+    # Build base query
+    query = select(Order)
+    conditions = []
     
     # Apply filters
     if user_id is not None:
-        query = query.where(Order.user_id == user_id)
+        conditions.append(Order.user_id == user_id)
     if status is not None:
-        query = query.where(Order.status == status)
+        conditions.append(Order.status == status)
     
-    # Get total count
+    if conditions:
+        query = query.where(and_(*conditions))
+    
+    # Add relationships if needed
+    if load_relationships:
+        query = query.options(
+            joinedload(Order.user),
+            selectinload(Order.items).selectinload(OrderItem.slipper)
+        )
+    
+    # Order by created_at for consistent results
+    query = query.order_by(Order.created_at.desc())
+    
+    # Sequential execution to avoid SQLite concurrent operations
     count_query = select(func.count()).select_from(query.subquery())
-    total_result = await db.execute(count_query)
-    total = total_result.scalar()
-    
-    # Get paginated results
-    result = await db.execute(query.offset(skip).limit(limit))
-    orders = result.scalars().all()
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+
+    data_result = await db.execute(query.offset(skip).limit(limit))
+    orders = data_result.scalars().all()
     
     return orders, total
 

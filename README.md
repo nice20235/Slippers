@@ -1,6 +1,6 @@
-# Restaurant API
+# Slippers API
 
-A FastAPI-based restaurant management system with user authentication, food management, and order processing.
+A FastAPI-based slippers ordering/management system with user authentication, slippers catalog, and order processing.
 
 ## Features
 
@@ -21,7 +21,7 @@ A FastAPI-based restaurant management system with user authentication, food mana
    Create a `.env` file in the root directory:
    ```env
    # Database Configuration
-   DATABASE_URL=postgresql+asyncpg://user:password@localhost/restaurant
+  DATABASE_URL=postgresql+asyncpg://user:password@localhost/slippers
    
    # JWT Configuration
    SECRET_KEY=your-super-secret-key-here
@@ -29,11 +29,11 @@ A FastAPI-based restaurant management system with user authentication, food mana
    ACCESS_TOKEN_EXPIRE_MINUTES=15
    
    # Optional: For development with SQLite
-   # DATABASE_URL=sqlite+aiosqlite:///./restaurant.db
+  # DATABASE_URL=sqlite+aiosqlite:///./slippers.db
    ```
 
 3. **Database Setup**:
-   - For PostgreSQL: Create a database named `restaurant`
+  - For PostgreSQL: Create a database named `slippers`
    - For SQLite: The database file will be created automatically
 
 4. **Run the application**:
