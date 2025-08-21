@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.auth.jwt import create_access_token, create_refresh_token, decode_refresh_token
 from app.crud.user import create_user, authenticate_user, get_user_by_name, get_user_by_phone_number, get_user, update_user_password
-from app.schemas.user import UserCreate, UserLogin, TokenResponse, RefreshTokenRequest, UserResponse, ForgotPasswordRequest
+from app.schemas.user import UserCreate, UserLogin, RefreshTokenRequest, UserResponse, ForgotPasswordRequest
 
 import logging
 import time
@@ -72,9 +72,9 @@ async def register_user(
         secure=settings.COOKIE_SECURE, samesite=settings.COOKIE_SAMESITE,
         domain=settings.COOKIE_DOMAIN
     )
-    user_data = UserResponse.from_orm(user).dict()
-    user_data.pop("id", None)
-    return {"message": "User registered successfully", "user": user_data}
+    user_payload = UserResponse.from_orm(user).dict()
+    user_payload.pop("id", None)
+    return {"message": "User registered successfully", "user": user_payload}
 
 
 @auth_router.post("/login")
@@ -112,9 +112,9 @@ async def login_user(
         domain=settings.COOKIE_DOMAIN
     )
     logger.info(f"User logged in successfully: {user.name} (ID: {user.id})")
-    user_data = UserResponse.from_orm(user).dict()
-    user_data.pop("id", None)
-    return {"message": "Login successful", "user": user_data}
+    user_payload = UserResponse.from_orm(user).dict()
+    user_payload.pop("id", None)
+    return {"message": "Login successful", "user": user_payload}
 
 
 @auth_router.post("/refresh")
@@ -156,9 +156,9 @@ async def refresh_token(
         domain=settings.COOKIE_DOMAIN
     )
     logger.info(f"Token refreshed for user: {user.name} (ID: {user.id})")
-    user_data = UserResponse.from_orm(user).dict()
-    user_data.pop("id", None)
-    return {"message": "Token refreshed", "user": user_data}
+    user_payload = UserResponse.from_orm(user).dict()
+    user_payload.pop("id", None)
+    return {"message": "Token refreshed", "user": user_payload}
 
 @auth_router.post("/logout")
 async def logout(response: Response):
