@@ -75,28 +75,28 @@ def cached(ttl: int = 300, key_prefix: str = ""):
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
-            # Generate cache key
-            cache_key = f"{key_prefix}:{func.__name__}:"
-            
-            # Include args in key (skip self/db sessions)
+            # Fast deterministic cache key assembly (avoid quadratic string concat)
+            parts = [key_prefix, func.__name__]
             for i, arg in enumerate(args):
-                if hasattr(arg, '__class__') and 'Session' in arg.__class__.__name__:
-                    continue  # Skip database sessions
-                cache_key += f"arg{i}:{str(arg)}:"
-            
-            # Include kwargs in key
-            for k, v in kwargs.items():
-                if hasattr(v, '__class__') and 'Session' in v.__class__.__name__:
-                    continue  # Skip database sessions
-                cache_key += f"{k}:{str(v)}:"
-            
-            # Try to get from cache
+                name = arg.__class__.__name__ if hasattr(arg, '__class__') else ''
+                if 'Session' in name:
+                    continue
+                parts.append(f"a{i}={arg}")
+            # Sort kwargs for stable ordering
+            for k in sorted(kwargs.keys()):
+                v = kwargs[k]
+                name = v.__class__.__name__ if hasattr(v, '__class__') else ''
+                if 'Session' in name:
+                    continue
+                parts.append(f"{k}={v}")
+            cache_key = ':'.join(parts)
+
             cached_result = await cache.get(cache_key)
             if cached_result is not None:
                 return cached_result
-            
-            # Execute function and cache result
+
             result = await func(*args, **kwargs)
+            # Fire-and-forget style set (no await) would risk race; keep await for correctness.
             await cache.set(cache_key, result, ttl)
             return result
         

@@ -101,23 +101,27 @@ async def create_user(db: AsyncSession, user: UserCreate) -> User:
     logger.info(f"Created user with ID: {db_user.id}")
     return db_user
 
-async def update_user(db: AsyncSession, db_user: User, user_update: UserUpdate) -> User:
-    """Update user"""
+async def update_user(db: AsyncSession, db_user: User, user_update: UserUpdate, load_orders: bool = False) -> User:
+    """Update user with optional order loading (avoids extra SELECT when not needed)."""
     update_data = user_update.model_dump(exclude_unset=True)
+    dirty = False
     for field, value in update_data.items():
-        setattr(db_user, field, value)
-    
-    db.add(db_user)
-    await db.commit()
-    await db.refresh(db_user)
-    
-    # Load relationships
-    result = await db.execute(
-        select(User)
-        .options(selectinload(User.orders))
-        .where(User.id == db_user.id)
-    )
-    return result.scalar_one()
+        if getattr(db_user, field) != value:
+            setattr(db_user, field, value)
+            dirty = True
+    if dirty:
+        db.add(db_user)
+        await db.commit()
+        # refresh only fields changed; full refresh not needed unless relationships requested
+        await db.refresh(db_user)
+    if load_orders:
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.orders))
+            .where(User.id == db_user.id)
+        )
+        return result.scalar_one()
+    return db_user
 
 async def delete_user(db: AsyncSession, db_user: User) -> bool:
     """Delete user"""
@@ -144,7 +148,7 @@ async def promote_to_admin(db: AsyncSession, name: str) -> Optional[User]:
     )
     return result.scalar_one()
 
-async def update_user_password(db: AsyncSession, name: str, new_password: str) -> Optional[User]:
+async def update_user_password(db: AsyncSession, name: str, new_password: str, load_orders: bool = False) -> Optional[User]:
     """Update user password by name"""
     user = await get_user_by_name(db, name)
     if not user:
@@ -155,6 +159,12 @@ async def update_user_password(db: AsyncSession, name: str, new_password: str) -
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    
+    if load_orders:
+        result = await db.execute(
+            select(User)
+            .options(selectinload(User.orders))
+            .where(User.id == user.id)
+        )
+        user = result.scalar_one()
     logger.info(f"Password updated for user: {user.name}")
     return user 
