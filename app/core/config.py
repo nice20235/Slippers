@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_EXCLUDE_PATHS: str = "/docs,/redoc,/openapi.json,/favicon.ico,/static"
     TRUST_PROXY: bool = False  # если True, брать IP из X-Forwarded-For
     DEBUG: bool = True  # для разработки
+    PHONE_ALLOWED_PREFIXES: str = "+,+998"  # допустимые префиксы телефонов
 
     class Config:
         env_file = ".env"

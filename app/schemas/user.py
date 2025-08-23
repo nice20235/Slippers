@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field, validator
+from app.core.config import settings
 from typing import Optional, List
 from datetime import datetime
 
@@ -20,7 +21,8 @@ class UserBase(BaseModel):
     phone_number: str = Field(
         ..., 
         description="User's phone number", 
-        min_length=10, 
+        # + plus at least 6 digits => total length >=7
+        min_length=7, 
         max_length=20,
         example="+79991234567"
     )
@@ -51,8 +53,16 @@ class UserCreate(UserBase):
     
     @validator('phone_number')
     def validate_phone_number(cls, v):
+        if not v:
+            raise ValueError('Phone number required')
+        v = v.strip()
         if not v.startswith('+'):
             raise ValueError('Phone number must start with +')
+        body = v[1:]
+        if not body.isdigit():
+            raise ValueError('Phone number must contain only digits after +')
+        if len(body) < 6 or len(body) > 15:
+            raise ValueError('Phone number length invalid (6-15 digits after +)')
         return v
     
     class Config:
@@ -85,7 +95,7 @@ class UserUpdate(BaseModel):
     phone_number: Optional[str] = Field(
         None, 
         description="User's phone number", 
-        min_length=10, 
+        min_length=7, 
         max_length=20,
         example="+79991234567"
     )
@@ -97,8 +107,16 @@ class UserUpdate(BaseModel):
     
     @validator('phone_number')
     def validate_phone_number(cls, v):
-        if v is not None and not v.startswith('+'):
+        if v is None:
+            return v
+        v = v.strip()
+        if not v.startswith('+'):
             raise ValueError('Phone number must start with +')
+        body = v[1:]
+        if not body.isdigit():
+            raise ValueError('Phone number must contain only digits after +')
+        if len(body) < 6 or len(body) > 15:
+            raise ValueError('Phone number length invalid (6-15 digits after +)')
         return v
     
     class Config:

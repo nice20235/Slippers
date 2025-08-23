@@ -6,6 +6,7 @@ from typing import AsyncGenerator
 import os
 import logging
 from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             yield session
         except HTTPException:
             # Expected API error paths: rollback without noisy error logs
+            await session.rollback()
+            raise
+        except RequestValidationError:
+            # Validation errors occur before hitting business logic; treat quietly
             await session.rollback()
             raise
         except Exception as e:
