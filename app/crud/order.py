@@ -3,6 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy import func, and_, or_
 from app.models.order import Order, OrderItem, OrderStatus
+from uuid import uuid4
 from app.models.food import Slipper
 from app.schemas.order import OrderCreate, OrderUpdate, OrderItemCreate
 from typing import Optional, List, Tuple
@@ -94,7 +95,10 @@ async def create_order(db: AsyncSession, order: OrderCreate) -> Order:
         order_items.append(order_item)
     
     # Create order
+    # Generate unique order_id (UUID hex, 16 chars)
+    order_id = order.order_id or uuid4().hex[:16]
     db_order = Order(
+        order_id=order_id,
         user_id=order.user_id,
         total_amount=total_amount,
         notes=order.notes

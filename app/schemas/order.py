@@ -5,12 +5,7 @@ from app.models.order import OrderStatus
 
 # Order Item schemas
 class OrderItemBase(BaseModel):
-    slipper_id: int = Field(
-        ..., 
-        description="Slipper ID", 
-        gt=0,
-        example=1
-    )
+    # slipper_id removed; it is now taken from the URL, not the payload
     quantity: int = Field(
         ..., 
         description="Quantity ordered", 
@@ -65,7 +60,6 @@ class OrderItemUpdate(BaseModel):
 
 class OrderItemInDB(OrderItemBase):
     id: int = Field(..., description="Order item ID", example=1)
-    order_id: int = Field(..., description="Order ID", example=1)
     total_price: float = Field(..., description="Total price for this item", example=1300.0)
     created_at: datetime = Field(..., description="Item creation timestamp", example="2024-01-15T10:30:00Z")
     
@@ -81,12 +75,14 @@ class OrderItemResponse(OrderItemInDB):
 
 # Order schemas
 class OrderBase(BaseModel):
+    order_id: str = Field(..., description="Unique order identifier", min_length=8, max_length=32)
     user_id: int = Field(..., description="User ID", gt=0)
     status: OrderStatus = Field(default=OrderStatus.PENDING, description="Order status")
     total_amount: float = Field(default=0.0, description="Total order amount", ge=0)
     notes: Optional[str] = Field(None, description="Order notes", max_length=500)
 
 class OrderCreate(BaseModel):
+    order_id: Optional[str] = Field(None, description="Unique order identifier (auto-generated)", min_length=8, max_length=32)
     user_id: int = Field(..., description="User ID", gt=0)
     items: List[OrderItemCreate] = Field(..., description="Order items", min_items=1)
     notes: Optional[str] = Field(None, description="Order notes", max_length=500)
@@ -103,7 +99,6 @@ class OrderUpdate(BaseModel):
     notes: Optional[str] = Field(None, description="Order notes", max_length=500)
 
 class OrderInDB(OrderBase):
-    id: int = Field(..., description="Order ID")
     created_at: datetime = Field(..., description="Order creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp")
     items: List[OrderItemInDB] = Field(..., description="Order items")

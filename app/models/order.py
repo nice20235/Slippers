@@ -21,6 +21,7 @@ class Order(Base):
     __tablename__ = "orders"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    order_id: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
     user_id: Mapped[int] = mapped_column(
         Integer, 
         ForeignKey("users.id", ondelete="CASCADE"), 
@@ -53,15 +54,16 @@ class Order(Base):
     
     # Indexes for better query performance  
     __table_args__ = (
-        Index('idx_orders_user', 'user_id'),
-        Index('idx_orders_status', 'status'),
-        Index('idx_orders_created', 'created_at'),
-        Index('idx_orders_updated', 'updated_at'),
-        # Composite indexes for common queries
-        Index('idx_orders_user_status', 'user_id', 'status'),
-        Index('idx_orders_user_created', 'user_id', 'created_at'),
-        Index('idx_orders_status_created', 'status', 'created_at'),
-        Index('idx_orders_total_amount', 'total_amount'),  # For analytics
+    Index('idx_orders_user', 'user_id'),
+    Index('idx_orders_status', 'status'),
+    Index('idx_orders_created', 'created_at'),
+    Index('idx_orders_updated', 'updated_at'),
+    Index('idx_orders_order_id', 'order_id'),
+    # Composite indexes for common queries
+    Index('idx_orders_user_status', 'user_id', 'status'),
+    Index('idx_orders_user_created', 'user_id', 'created_at'),
+    Index('idx_orders_status_created', 'status', 'created_at'),
+    Index('idx_orders_total_amount', 'total_amount'),  # For analytics
     )
     
     def __repr__(self):
