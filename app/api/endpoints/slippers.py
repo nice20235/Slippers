@@ -25,6 +25,7 @@ async def read_slippers(
 	limit: int = Query(20, ge=1, le=100, description="Limit items per page"),
 	category_id: Optional[int] = Query(None, description="Filter by category ID"),
 	search: Optional[str] = Query(None, description="Search in name and size"),
+	sort: str = Query("id_desc", description="Sort order: id_asc,id_desc,name_asc,name_desc,price_asc,price_desc,created_asc,created_desc"),
 	db: AsyncSession = Depends(get_db)
 ):
 	"""
@@ -37,7 +38,8 @@ async def read_slippers(
 			skip=skip, 
 			limit=limit, 
 			category_id=category_id,
-			search=search
+			search=search,
+			sort=sort
 		)
 		
 		# Optimized response structure
@@ -61,7 +63,8 @@ async def read_slippers(
 			"page": (skip // limit) + 1,
 			"pages": (total + limit - 1) // limit,
 			"has_next": skip + limit < total,
-			"has_prev": skip > 0
+			"has_prev": skip > 0,
+			"sort": sort
 		}
 		
 	except Exception as e:

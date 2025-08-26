@@ -16,6 +16,7 @@ from app.core.middleware import PerformanceMiddleware, CompressionHeaderMiddlewa
 from app.core.cache import cache
 from app.db.database import init_db, close_db
 from app.api.endpoints import users, slippers, orders, categories
+from app.api.payments import payments_router
 from app.auth.routes import auth_router
 from app.schemas.responses import HealthCheckResponse, ErrorResponse
 
@@ -206,11 +207,13 @@ async def global_exception_handler(request, exc):
     )
 
 # Include routers
+
 app.include_router(auth_router, prefix="/auth", tags=["Authentication"])
 app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(categories.router, prefix="/categories", tags=["Categories"])
 app.include_router(slippers.router, prefix="/slippers", tags=["Slippers"])
 app.include_router(orders.router, prefix="/orders", tags=["Orders"])
+app.include_router(payments_router)
 
 # Serve static files (images, etc.)
 static_dir = os.path.join(os.path.dirname(__file__), "static")

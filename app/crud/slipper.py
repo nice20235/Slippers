@@ -56,7 +56,14 @@ async def get_slipper(db: AsyncSession, slipper_id: int, load_images: bool = Fal
 	return result.scalar_one_or_none()
 
 
-async def get_slippers(db: AsyncSession, skip: int = 0, limit: int = 100, category_id: Optional[int] = None, search: Optional[str] = None) -> Tuple[List[Slipper], int]:
+async def get_slippers(
+	db: AsyncSession,
+	skip: int = 0,
+	limit: int = 100,
+	category_id: Optional[int] = None,
+	search: Optional[str] = None,
+	sort: str = "name_asc"
+) -> Tuple[List[Slipper], int]:
 	"""Get slippers with pagination and filters - optimized"""
 	# Build base query with efficient loading
 	query = select(Slipper).options(joinedload(Slipper.category))
@@ -77,8 +84,19 @@ async def get_slippers(db: AsyncSession, skip: int = 0, limit: int = 100, catego
 	if conditions:
 		query = query.where(and_(*conditions))
 	
-	# Order by name for consistent results
-	query = query.order_by(Slipper.name)
+	# Sorting options
+	sort_map = {
+		"id_asc": Slipper.id.asc(),
+		"id_desc": Slipper.id.desc(),
+		"name_asc": Slipper.name.asc(),
+		"name_desc": Slipper.name.desc(),
+		"price_asc": Slipper.price.asc(),
+		"price_desc": Slipper.price.desc(),
+		"created_asc": Slipper.created_at.asc(),
+		"created_desc": Slipper.created_at.desc(),
+	}
+	order_clause = sort_map.get(sort, Slipper.name.asc())
+	query = query.order_by(order_clause)
 	
 	# Sequential execution to avoid SQLite concurrent operations
 	count_query = select(func.count()).select_from(query.subquery())
