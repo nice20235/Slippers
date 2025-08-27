@@ -242,38 +242,6 @@ async def delete_existing_slipper(
 		raise HTTPException(status_code=500, detail="Error deleting slipper")
 
 
-@router.post("/{slipper_id}/upload-image", summary="Загрузить изображение для тапочки")
-async def upload_slipper_image(
-    slipper_id: int,
-    image: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    current_admin: dict = Depends(get_current_admin)
-):
-    """
-    Загрузить/обновить изображение для существующей тапочки по id.
-    """
-    from app.models.food import Slipper
-    slipper = await get_slipper(db, slipper_id=slipper_id)
-    if not slipper:
-        raise HTTPException(status_code=404, detail="Slipper not found")
-
-    ext = os.path.splitext(image.filename)[1]
-    if ext.lower() not in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
-        raise HTTPException(status_code=400, detail="Invalid image format")
-    filename = f"{uuid4().hex}{ext}"
-    upload_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../static/images'))
-    os.makedirs(upload_dir, exist_ok=True)
-    file_path = os.path.join(upload_dir, filename)
-    with open(file_path, "wb") as f:
-        f.write(await image.read())
-    relative_path = f"/static/images/{filename}"
-
-    slipper.image = relative_path
-    db.add(slipper)
-    await db.commit()
-    await db.refresh(slipper)
-    return {"id": slipper.id, "image": slipper.image}
-
 
 @router.post("/{slipper_id}/upload-images", summary="Загрузить несколько изображений для тапочки")
 async def upload_slipper_images(
