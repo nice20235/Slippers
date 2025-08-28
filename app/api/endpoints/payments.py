@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
 from typing import Optional, Any, Dict, List
 
-from app.auth.dependencies import get_current_admin
+from app.auth.dependencies import get_current_user
 from app.core.config import settings
 
 IPAKYULI_BASE_URL = "https://ecom.ipakyulibank.uz/api/transfer"
@@ -104,7 +104,7 @@ async def call_ipakyuli_api(method: str, params: Dict[str, Any]) -> Dict[str, An
     return result
 
 @router.post("/create", response_model=PaymentCreateResponse, summary="Create a payment transfer")
-async def create_payment(req: PaymentCreateRequest, current_admin: dict = Depends(get_current_admin)):
+async def create_payment(req: PaymentCreateRequest, current_user: dict = Depends(get_current_user)):
     # Determine main page
     from app.core.config import settings
     # Pick first allowed origin if configured and not wildcard
@@ -146,7 +146,7 @@ async def create_payment(req: PaymentCreateRequest, current_admin: dict = Depend
     return PaymentCreateResponse(transfer_id=transfer_id, payment_url=payment_url)
 
 @router.get("/{transfer_id}/status", response_model=PaymentStatusResponse, summary="Get payment status")
-async def payment_status(transfer_id: str, current_admin: dict = Depends(get_current_admin)):
+async def payment_status(transfer_id: str, current_user: dict = Depends(get_current_user)):
     # Upstream validation error indicated it expects 'id' (GetTransferByIdDto), so send both keys.
     result = await call_ipakyuli_api("transfer.get", {"id": transfer_id, "transfer_id": transfer_id})
     raw_expires = result.get("expires_at") or result.get("expiresAt")
@@ -182,7 +182,7 @@ async def payment_status(transfer_id: str, current_admin: dict = Depends(get_cur
     )
 
 @router.post("/{transfer_id}/cancel", response_model=PaymentCancelResponse, summary="Cancel a payment transfer")
-async def cancel_payment(transfer_id: str, current_admin: dict = Depends(get_current_admin)):
+async def cancel_payment(transfer_id: str, current_user: dict = Depends(get_current_user)):
     result = await call_ipakyuli_api("transfer.cancel", {"id": transfer_id, "transfer_id": transfer_id})
     return PaymentCancelResponse(
         transfer_id=transfer_id,
