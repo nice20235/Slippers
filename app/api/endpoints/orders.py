@@ -2,7 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from app.db.database import get_db
-from app.schemas.order import OrderInDB, OrderCreate, OrderUpdate
+from app.schemas.order import (
+    OrderInDB,
+    OrderCreate,
+    OrderUpdate,
+    OrderCreatePublic,
+    OrderPublic,
+    OrderItemCreate,
+)
 from app.models.order import OrderStatus
 from app.crud.order import get_orders, get_user_orders, get_order, create_order, update_order, delete_order
 from app.auth.dependencies import get_current_user, get_current_admin
@@ -14,21 +21,50 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-@router.post("/", response_model=OrderInDB)
-async def create_order_endpoint(order: OrderCreate, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+@router.post("/", response_model=OrderPublic)
+async def create_order_endpoint(order: OrderCreatePublic, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
     """
     Create a new order. Available to all authenticated users.
     """
     logger.info(f"Creating order for user: {user.name} (Admin: {user.is_admin})")
     # Set the user_id from the authenticated user
-    order.user_id = user.id
-    new_order = await create_order(db, order)
+    internal_order = OrderCreate(
+        order_id=None,
+        user_id=user.id,
+        items=[
+            OrderItemCreate(
+                slipper_id=it.slipper_id,
+                quantity=it.quantity,
+                unit_price=1.0,  # dummy value; real price fetched in CRUD
+                notes=it.notes,
+            )
+            for it in order.items
+        ],
+        notes=order.notes,
+    )
+    new_order = await create_order(db, internal_order)
     
     # Clear cache after creating order
     from app.core.cache import invalidate_cache_pattern
     await invalidate_cache_pattern("orders:")
     
-    return new_order
+    return OrderPublic(
+        order_id=new_order.order_id,
+        status=new_order.status,
+        total_amount=new_order.total_amount,
+        notes=new_order.notes,
+        created_at=new_order.created_at,
+        items=[
+            {
+                "slipper_id": oi.slipper_id,
+                "quantity": oi.quantity,
+                "unit_price": oi.unit_price,
+                "total_price": oi.total_price,
+                "notes": oi.notes,
+            }
+            for oi in new_order.items
+        ],
+    )
 
 @router.get("/")
 @cached(ttl=60, key_prefix="orders")
@@ -48,12 +84,12 @@ async def list_orders(
         if user.is_admin:
             logger.info(f"Admin {user.name} listing orders (skip={skip}, limit={limit})")
             orders, total = await get_orders(
-                db, skip=skip, limit=limit, status=status, load_relationships=False
+                db, skip=skip, limit=limit, status=status, load_relationships=True
             )
         else:
             logger.info(f"User {user.name} listing their own orders")
             orders, total = await get_orders(
-                db, skip=skip, limit=limit, user_id=user.id, status=status, load_relationships=False
+                db, skip=skip, limit=limit, user_id=user.id, status=status, load_relationships=True
             )
         
         # Optimized response structure

@@ -5,25 +5,17 @@ from app.models.order import OrderStatus
 
 # Order Item schemas
 class OrderItemBase(BaseModel):
-    # slipper_id removed; it is now taken from the URL, not the payload
+    slipper_id: int = Field(
+        ..., description="Slipper ID", gt=0, example=1
+    )
     quantity: int = Field(
-        ..., 
-        description="Quantity ordered", 
-        gt=0, 
-        le=100,
-        example=2
+        ..., description="Quantity ordered", gt=0, le=100, example=2
     )
     unit_price: float = Field(
-        ..., 
-        description="Unit price", 
-        gt=0,
-        example=650.0
+        ..., description="Unit price at order time (ignored on create, taken from product)", gt=0, example=650.0
     )
     notes: Optional[str] = Field(
-        None, 
-        description="Special instructions", 
-        max_length=255,
-        example="Extra cheese, please"
+        None, description="Special instructions", max_length=255, example="Handle with care"
     )
 
 class OrderItemCreate(OrderItemBase):
@@ -33,7 +25,7 @@ class OrderItemCreate(OrderItemBase):
                 "slipper_id": 1,
                 "quantity": 2,
                 "unit_price": 650.0,
-                "notes": "Extra cheese, please"
+                "notes": "Handle with care"
             }
         }
 
@@ -72,6 +64,37 @@ class OrderItemInDB(OrderItemBase):
 class OrderItemResponse(OrderItemInDB):
     """Order item response schema for API endpoints"""
     pass
+
+# -------------------- Public (API) simplified schemas --------------------
+class OrderItemCreatePublic(BaseModel):
+    slipper_id: int = Field(..., description="Slipper ID", gt=0, example=1)
+    quantity: int = Field(..., description="Quantity ordered", gt=0, le=100, example=2)
+    notes: Optional[str] = Field(None, description="Item notes", max_length=255)
+
+class OrderCreatePublic(BaseModel):
+    items: List[OrderItemCreatePublic] = Field(..., min_items=1, description="Order items")
+    notes: Optional[str] = Field(None, description="Order notes", max_length=500)
+
+    @validator('items')
+    def validate_items(cls, v):  # type: ignore
+        if not v:
+            raise ValueError('Order must have at least one item')
+        return v
+
+class OrderItemPublic(BaseModel):
+    slipper_id: int
+    quantity: int
+    unit_price: float
+    total_price: float
+    notes: Optional[str] = None
+
+class OrderPublic(BaseModel):
+    order_id: str
+    status: OrderStatus
+    total_amount: float
+    notes: Optional[str]
+    created_at: datetime
+    items: List[OrderItemPublic]
 
 # Order schemas
 class OrderBase(BaseModel):

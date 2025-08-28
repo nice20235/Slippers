@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     TRUST_PROXY: bool = False  # если True, брать IP из X-Forwarded-For
     DEBUG: bool = True  # для разработки
     PHONE_ALLOWED_PREFIXES: str = "+,+998"  # допустимые префиксы телефонов
+    IPAKYULI_ACCESS_TOKEN: str | None = None  # токен для платежного API
 
     class Config:
         env_file = ".env"

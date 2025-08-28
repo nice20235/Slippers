@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.core.middleware import PerformanceMiddleware, CompressionHeaderMiddleware, SecurityHeadersMiddleware
 from app.core.cache import cache
 from app.db.database import init_db, close_db
-from app.api.endpoints import users, slippers, orders, categories
+from app.api.endpoints import users, slippers, orders, categories, payments
 from app.auth.routes import auth_router
 from app.schemas.responses import HealthCheckResponse, ErrorResponse
 
@@ -212,6 +212,7 @@ app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(categories.router, prefix="/categories", tags=["Categories"])
 app.include_router(slippers.router, prefix="/slippers", tags=["Slippers"])
 app.include_router(orders.router, prefix="/orders", tags=["Orders"])
+app.include_router(payments.router, prefix="/payments", tags=["Payments"])
 
 # Serve static files (images, etc.)
 static_dir = os.path.join(os.path.dirname(__file__), "static")

@@ -1,9 +1,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload, joinedload
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_
 from app.models.order import Order, OrderItem, OrderStatus
-from uuid import uuid4
 from app.models.food import Slipper
 from app.schemas.order import OrderCreate, OrderUpdate, OrderItemCreate
 from typing import Optional, List, Tuple
@@ -94,27 +93,31 @@ async def create_order(db: AsyncSession, order: OrderCreate) -> Order:
         )
         order_items.append(order_item)
     
-    # Create order
-    # Generate unique order_id (UUID hex, 16 chars)
-    order_id = order.order_id or uuid4().hex[:16]
+    # Create order with temporary placeholder order_id if none provided
+    provided_order_id = order.order_id
     db_order = Order(
-        order_id=order_id,
+        order_id=provided_order_id if provided_order_id else "0",
         user_id=order.user_id,
         total_amount=total_amount,
         notes=order.notes
     )
     db.add(db_order)
-    await db.flush()  # Get the order ID
-    
-    # Set order_id for all items
+    await db.flush()  # obtain primary key
+
+    # If no order_id provided, set sequential numeric based on primary key
+    if not provided_order_id:
+        db_order.order_id = str(db_order.id)
+        db.add(db_order)
+
+    # Attach items
     for item in order_items:
         item.order_id = db_order.id
         db.add(item)
-    
+
     await db.commit()
     await db.refresh(db_order)
-    
-    # Load relationships
+
+    # Load relationships for response
     result = await db.execute(
         select(Order)
         .options(
@@ -126,16 +129,13 @@ async def create_order(db: AsyncSession, order: OrderCreate) -> Order:
     return result.scalar_one()
 
 async def update_order(db: AsyncSession, db_order: Order, order_update: OrderUpdate) -> Order:
-    """Update order"""
+    """Update an existing order and return with relationships."""
     update_data = order_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(db_order, field, value)
-    
     db.add(db_order)
     await db.commit()
     await db.refresh(db_order)
-    
-    # Load relationships
     result = await db.execute(
         select(Order)
         .options(
