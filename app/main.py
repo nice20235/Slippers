@@ -16,6 +16,7 @@ from app.core.middleware import PerformanceMiddleware, CompressionHeaderMiddlewa
 from app.core.cache import cache
 from app.db.database import init_db, close_db
 from app.api.endpoints import users, slippers, orders, categories, payments
+from app.api.endpoints.system import system_router
 from app.auth.routes import auth_router
 from app.schemas.responses import HealthCheckResponse, ErrorResponse
 
@@ -27,6 +28,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+START_TIME = time.time()
 
 # Application lifespan manager
 @asynccontextmanager
@@ -213,6 +216,7 @@ app.include_router(categories.router, prefix="/categories", tags=["Categories"])
 app.include_router(slippers.router, prefix="/slippers", tags=["Slippers"])
 app.include_router(orders.router, prefix="/orders", tags=["Orders"])
 app.include_router(payments.router, prefix="/payments", tags=["Payments"])
+app.include_router(system_router, prefix="/system", tags=["System"])
 
 # Serve static files (images, etc.)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -228,6 +232,20 @@ async def root():
         "docs": "/docs",
         "status": "operational"
     }
+
+# Slow request logging middleware (diagnostics)
+SLOW_REQUEST_THRESHOLD_SEC = 1.0  # adjust as needed
+
+@app.middleware("http")
+async def slow_request_logger(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration = time.time() - start
+    if duration > SLOW_REQUEST_THRESHOLD_SEC:
+        logger.warning("Slow request path=%s duration=%.3fs", request.url.path, duration)
+    response.headers["X-Process-Time"] = f"{duration:.3f}s"
+    response.headers["X-Uptime"] = f"{int(time.time() - START_TIME)}"
+    return response
 
 # Health check endpoint  
 @app.get("/health", tags=["System"], response_model=HealthCheckResponse)
