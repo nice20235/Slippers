@@ -21,7 +21,7 @@ class PaymentCreateRequest(BaseModel):
     description: str = Field(..., max_length=255)
     success_url: Optional[str] = Field(None, description="Redirect URL after successful payment (defaults to main page)")
     fail_url: str = Field(..., description="Redirect URL after failed/cancelled payment")
-    expires_in_minutes: Optional[int] = Field(None, ge=1, le=1440, description="Minutes until transfer expires")
+    expires_in_minutes: Optional[int] = Field(5, ge=1, le=1440, description="Minutes until transfer expires (default 5)")
     card_systems: Optional[List[str]] = Field(
         None,
         description="Optional list to restrict allowed card networks, e.g. ['UZCARD','HUMO','VISA','MASTERCARD','UNIONPAY'] if supported by provider/merchant setup"
@@ -129,8 +129,8 @@ async def create_payment(req: PaymentCreateRequest, current_admin: dict = Depend
         "amount": req.amount,
         "details": details,
     }
-    if req.expires_in_minutes is not None:
-        params["expires_in_minutes"] = req.expires_in_minutes
+    # Always send explicit expiration; default is 5 if client omitted
+    params["expires_in_minutes"] = req.expires_in_minutes or 5
     if req.card_systems:
         # Pass through requested card systems; actual acceptance depends on provider configuration
         params["card_systems"] = req.card_systems
