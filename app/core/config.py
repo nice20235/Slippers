@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     DEBUG: bool = True  # для разработки
     PHONE_ALLOWED_PREFIXES: str = "+,+998"  # допустимые префиксы телефонов
     IPAKYULI_ACCESS_TOKEN: str | None = None  # токен для платежного API
+    # App runtime settings (production deploy alignment)
+    APP_HOST: str = "0.0.0.0"
+    APP_PORT: int = 8000
+    APP_WORKERS: int = 1  # only used if a process manager launches multiple workers
 
     class Config:
         env_file = ".env"
