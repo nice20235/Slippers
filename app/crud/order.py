@@ -99,7 +99,8 @@ async def create_order(db: AsyncSession, order: OrderCreate) -> Order:
         order_id=provided_order_id if provided_order_id else "0",
         user_id=order.user_id,
         total_amount=total_amount,
-        notes=order.notes
+        notes=order.notes,
+        status="pending"
     )
     db.add(db_order)
     await db.flush()  # obtain primary key

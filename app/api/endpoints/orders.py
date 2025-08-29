@@ -1,6 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
 from app.db.database import get_db
 from app.schemas.order import (
     OrderInDB,
@@ -10,7 +9,6 @@ from app.schemas.order import (
     OrderPublic,
     OrderItemCreate,
 )
-from app.models.order import OrderStatus
 from app.crud.order import get_orders, get_user_orders, get_order, create_order, update_order, delete_order
 from app.auth.dependencies import get_current_user, get_current_admin
 from app.core.cache import cached
@@ -68,34 +66,22 @@ async def create_order_endpoint(order: OrderCreatePublic, db: AsyncSession = Dep
 
 @router.get("/")
 @cached(ttl=60, key_prefix="orders")
-async def list_orders(
-    skip: int = Query(0, ge=0, description="Skip items for pagination"),
-    limit: int = Query(20, ge=1, le=100, description="Limit items per page"),
-    status: Optional[OrderStatus] = Query(None, description="Filter by order status"),
-    db: AsyncSession = Depends(get_db), 
-    user=Depends(get_current_user)
-):
-    """
-    List orders with pagination and filtering.
-    Admins can see all orders, users can only see their own orders.
-    Optimized with concurrent queries.
+async def list_orders(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    """List orders.
+    - Regular user: only their own orders.
+    - Admin: all users' orders.
+    Pagination & status filtering removed per request.
     """
     try:
         if user.is_admin:
-            logger.info(f"Admin {user.name} listing orders (skip={skip}, limit={limit})")
-            orders, total = await get_orders(
-                db, skip=skip, limit=limit, status=status, load_relationships=True
-            )
+            logger.info(f"Admin {user.name} listing ALL orders")
+            orders, total = await get_orders(db, skip=0, limit=100000, load_relationships=True)
         else:
-            logger.info(f"User {user.name} listing their own orders")
-            orders, total = await get_orders(
-                db, skip=skip, limit=limit, user_id=user.id, status=status, load_relationships=True
-            )
-        
-        # Optimized response structure
-        items = []
-        for order in orders:
-            items.append({
+            logger.info(f"User {user.name} listing OWN orders")
+            orders, total = await get_orders(db, skip=0, limit=100000, user_id=user.id, load_relationships=True)
+
+        return [
+            {
                 "id": order.id,
                 "user_id": order.user_id,
                 "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
@@ -103,17 +89,9 @@ async def list_orders(
                 "total_amount": order.total_amount,
                 "created_at": order.created_at.isoformat(),
                 "updated_at": order.updated_at.isoformat() if order.updated_at else None,
-            })
-        
-        return {
-            "items": items,
-            "total": total,
-            "page": (skip // limit) + 1,
-            "pages": (total + limit - 1) // limit,
-            "has_next": skip + limit < total,
-            "has_prev": skip > 0
-        }
-        
+            }
+            for order in orders
+        ]
     except Exception as e:
         logger.error(f"Error fetching orders: {e}")
         raise HTTPException(status_code=500, detail="Error fetching orders")

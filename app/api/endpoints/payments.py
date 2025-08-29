@@ -2,12 +2,16 @@ import os
 import uuid
 import httpx
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from typing import Optional, Any, Dict, List
 
 from app.auth.dependencies import get_current_user
 from app.core.config import settings
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.db.database import get_db
+from app.models.order import Order, OrderStatus
 
 IPAKYULI_BASE_URL = "https://ecom.ipakyulibank.uz/api/transfer"
 JSON_RPC_VERSION = "2.0"
@@ -43,6 +47,23 @@ class PaymentCancelResponse(BaseModel):
     transfer_id: str
     cancelled: bool
     status: Optional[str] = None
+
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import secrets
+import os
+
+class PaymentCallbackPayload(BaseModel):
+    transactionId: str
+    orderId: str
+    status: str
+    amount: float
+    sourceAccount: Optional[str] = None
+    createdAt: Optional[str] = None
+    updatedAt: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+    # allow unknown extra fields from provider
+    class Config:
+        extra = 'allow'
 
 async def call_ipakyuli_api(method: str, params: Dict[str, Any]) -> Dict[str, Any]:
     """Generic helper for Ipakyuli JSON-RPC calls.
@@ -104,7 +125,7 @@ async def call_ipakyuli_api(method: str, params: Dict[str, Any]) -> Dict[str, An
     return result
 
 @router.post("/create", response_model=PaymentCreateResponse, summary="Create a payment transfer")
-async def create_payment(req: PaymentCreateRequest, current_user: dict = Depends(get_current_user)):
+async def create_payment(req: PaymentCreateRequest, current_user: dict = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     # Determine main page
     from app.core.config import settings
     # Pick first allowed origin if configured and not wildcard
@@ -143,7 +164,76 @@ async def create_payment(req: PaymentCreateRequest, current_user: dict = Depends
     if not transfer_id or not payment_url:
         raise HTTPException(status_code=502, detail="Incomplete create response from Ipakyuli")
 
+    # Persist transfer_id to matching order (by public order_id) if exists and belongs to user
+    try:
+        result = await db.execute(select(Order).where(Order.order_id == req.order_id))
+        order = result.scalar_one_or_none()
+        if order and (order.user_id == current_user.id or current_user.is_admin):
+            order.transfer_id = transfer_id
+            await db.commit()
+    except Exception as e:
+        logger.warning("Failed to associate transfer_id with order %s: %s", req.order_id, e)
     return PaymentCreateResponse(transfer_id=transfer_id, payment_url=payment_url)
+
+
+
+
+@router.post("/webhook", summary="Payment status callback (bank -> us)")
+async def payment_callback(
+    payload: PaymentCallbackPayload,
+    credentials: HTTPBasicCredentials = Depends(HTTPBasic()),
+    db: AsyncSession = Depends(get_db)
+):
+    BASIC_AUTH_USERNAME = os.getenv("CALLBACK_BASIC_AUTH_USERNAME", "")
+    BASIC_AUTH_PASSWORD = os.getenv("CALLBACK_BASIC_AUTH_PASSWORD", "")
+    correct_username = secrets.compare_digest(credentials.username, BASIC_AUTH_USERNAME)
+    correct_password = secrets.compare_digest(credentials.password, BASIC_AUTH_PASSWORD)
+    if not (correct_username and correct_password):
+        logger.warning("Webhook rejected: invalid basic auth")
+        raise HTTPException(status_code=401, detail="Invalid authentication")
+    logger.info("Webhook received transactionId=%s status=%s", payload.transactionId, payload.status)
+    transfer_id = payload.transactionId
+    new_status = (payload.status or "").lower()
+    mapped_status = None
+    status_map = {
+        "paid": OrderStatus.CONFIRMED,
+        "completed": OrderStatus.CONFIRMED,
+        "success": OrderStatus.CONFIRMED,
+        "confirmed": OrderStatus.CONFIRMED,
+        "cancelled": OrderStatus.CANCELLED,
+        "failed": OrderStatus.CANCELLED,
+        "expired": OrderStatus.CANCELLED,
+        "await_payment": OrderStatus.PENDING,
+        "await-payment": OrderStatus.PENDING,
+        "pending": OrderStatus.PENDING,
+    }
+    order_found = False
+    status_updated = False
+    if transfer_id:
+        try:
+            result = await db.execute(select(Order).where(Order.transfer_id == transfer_id))
+            order = result.scalar_one_or_none()
+            if order:
+                order_found = True
+                mapped_status = status_map.get(new_status)
+                if mapped_status and order.status != mapped_status:
+                    order.status = mapped_status
+                    await db.commit()
+                    status_updated = True
+                    logger.info(f"Order {order.id} status updated to {mapped_status}")
+                else:
+                    logger.info(f"Order {order.id} found but status not updated (current: {order.status}, requested: {mapped_status})")
+            else:
+                logger.warning(f"No order found with transfer_id={transfer_id}")
+        except Exception as e:
+            logger.error("Webhook order update failed: %s", e)
+    if order_found and status_updated:
+        return {"code": 0, "message": "Callback received successfully"}
+    elif not order_found:
+        return {"code": 1, "message": f"Order not found for transfer_id {transfer_id}"}
+    else:
+        return {"code": 2, "message": f"Order found but status not updated (current: {order.status}, requested: {mapped_status})"}
+
 
 @router.get("/{transfer_id}/status", response_model=PaymentStatusResponse, summary="Get payment status")
 async def payment_status(transfer_id: str, current_user: dict = Depends(get_current_user)):
