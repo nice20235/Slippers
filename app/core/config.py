@@ -4,8 +4,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://user:password@localhost/slippers"
     SECRET_KEY: str = "supersecretkey"
     ALGORITHM: str = "HS256"
-    CALLBACK_BASIC_AUTH_USERNAME: str = ""
-    CALLBACK_BASIC_AUTH_PASSWORD: str = ""
+    # CALLBACK_BASIC_AUTH_USERNAME and CALLBACK_BASIC_AUTH_PASSWORD removed (payment system)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
@@ -21,8 +20,7 @@ class Settings(BaseSettings):
     TRUST_PROXY: bool = False  # если True, брать IP из X-Forwarded-For
     DEBUG: bool = True  # для разработки
     PHONE_ALLOWED_PREFIXES: str = "+,+998"  # допустимые префиксы телефонов
-    IPAKYULI_ACCESS_TOKEN: str | None = None  # токен для платежного API
-    IPAKYULI_WEBHOOK_SECRET: str | None = None  # shared secret for validating bank callbacks
+    # IPAKYULI_ACCESS_TOKEN and IPAKYULI_WEBHOOK_SECRET removed (payment system)
     # App runtime settings (production deploy alignment)
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
