@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.schemas.order import (
@@ -9,7 +9,16 @@ from app.schemas.order import (
     OrderPublic,
     OrderItemCreate,
 )
-from app.crud.order import get_orders, get_user_orders, get_order, create_order, update_order, delete_order
+from app.crud.order import (
+    get_orders,
+    get_user_orders,
+    get_order,
+    create_order,
+    update_order,
+    delete_order,
+    get_orders_by_payment_statuses,
+)
+from app.models.payment import PaymentStatus
 from app.auth.dependencies import get_current_user, get_current_admin
 from app.core.cache import cached
 import logging
@@ -66,32 +75,64 @@ async def create_order_endpoint(order: OrderCreatePublic, db: AsyncSession = Dep
 
 @router.get("/")
 @cached(ttl=60, key_prefix="orders")
-async def list_orders(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def list_orders(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+    finance: str | None = Query(
+        None,
+        description="Financial filter: 'paid_refunded' shows only orders with latest payment PAID or REFUNDED",
+    ),
+):
     """List orders.
     - Regular user: only their own orders.
     - Admin: all users' orders.
     Pagination & status filtering removed per request.
     """
     try:
-        if user.is_admin:
-            logger.info(f"Admin {user.name} listing ALL orders")
-            orders, total = await get_orders(db, skip=0, limit=100000, load_relationships=True)
+        if finance and finance.lower() == "paid_refunded":
+            statuses = [PaymentStatus.PAID, PaymentStatus.REFUNDED]
+            if user.is_admin:
+                logger.info("Admin %s listing orders with finance filter paid_refunded", user.name)
+                rows, total = await get_orders_by_payment_statuses(db, statuses=statuses, load_relationships=True)
+            else:
+                logger.info("User %s listing OWN orders with finance filter paid_refunded", user.name)
+                rows, total = await get_orders_by_payment_statuses(db, statuses=statuses, user_id=user.id, load_relationships=True)
+            # rows are tuples (order, payment_status)
+            result = []
+            for order, pay_status in rows:
+                result.append(
+                    {
+                        "id": order.id,
+                        "user_id": order.user_id,
+                        "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
+                        "status": order.status.value,
+                        "payment_status": "success" if pay_status == PaymentStatus.PAID else ("refunded" if pay_status == PaymentStatus.REFUNDED else None),
+                        "total_amount": order.total_amount,
+                        "created_at": order.created_at.isoformat(),
+                        "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+                    }
+                )
+            return result
         else:
-            logger.info(f"User {user.name} listing OWN orders")
-            orders, total = await get_orders(db, skip=0, limit=100000, user_id=user.id, load_relationships=True)
+            if user.is_admin:
+                logger.info(f"Admin {user.name} listing ALL orders")
+                orders, total = await get_orders(db, skip=0, limit=100000, load_relationships=True)
+            else:
+                logger.info(f"User {user.name} listing OWN orders")
+                orders, total = await get_orders(db, skip=0, limit=100000, user_id=user.id, load_relationships=True)
 
-        return [
-            {
-                "id": order.id,
-                "user_id": order.user_id,
-                "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
-                "status": order.status.value,
-                "total_amount": order.total_amount,
-                "created_at": order.created_at.isoformat(),
-                "updated_at": order.updated_at.isoformat() if order.updated_at else None,
-            }
-            for order in orders
-        ]
+            return [
+                {
+                    "id": order.id,
+                    "user_id": order.user_id,
+                    "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
+                    "status": order.status.value,
+                    "total_amount": order.total_amount,
+                    "created_at": order.created_at.isoformat(),
+                    "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+                }
+                for order in orders
+            ]
     except Exception as e:
         logger.error(f"Error fetching orders: {e}")
         raise HTTPException(status_code=500, detail="Error fetching orders")

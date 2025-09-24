@@ -10,6 +10,7 @@ from app.core.config import settings
 # ----- Pydantic response models (minimal) -----
 class OctoPrepareResponse(BaseModel):
     success: bool
+    shop_transaction_id: Optional[str] = None
     octo_payment_UUID: Optional[str] = None
     octo_pay_url: Optional[str] = None
     error: Optional[int] = None
@@ -112,6 +113,7 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
     d = data.get("data") or {}
     return OctoPrepareResponse(
         success=True,
+        shop_transaction_id=shop_transaction_id,
         octo_payment_UUID=data.get("octo_payment_UUID") or d.get("octo_payment_UUID"),
         octo_pay_url=data.get("octo_pay_url") or d.get("octo_pay_url"),
         raw=data,

@@ -7,6 +7,7 @@ from app.models.food import Slipper
 from app.schemas.order import OrderCreate, OrderUpdate, OrderItemCreate
 from typing import Optional, List, Tuple
 import logging
+from app.models.payment import Payment, PaymentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,63 @@ async def get_orders(
     orders = data_result.scalars().all()
     
     return orders, total
+
+
+async def get_orders_by_payment_statuses(
+    db: AsyncSession,
+    *,
+    statuses: List[PaymentStatus],
+    user_id: Optional[int] = None,
+    load_relationships: bool = True,
+) -> Tuple[List[Tuple[Order, Optional[PaymentStatus]]], int]:
+    """Return orders where the latest payment status is in provided statuses.
+    If user_id is provided, restrict to that user's orders.
+    Returns list of tuples: (Order, latest_payment_status).
+    """
+    # Subquery to get latest payment per order by created_at
+    latest_payment_sq = (
+        select(
+            Payment.order_id,
+            func.max(Payment.created_at).label("max_created"),
+        )
+        .group_by(Payment.order_id)
+        .subquery()
+    )
+
+    # Join orders with latest payments
+    base = (
+        select(Order, Payment.status)
+        .join(latest_payment_sq, latest_payment_sq.c.order_id == Order.id, isouter=True)
+        .join(
+            Payment,
+            (Payment.order_id == latest_payment_sq.c.order_id)
+            & (Payment.created_at == latest_payment_sq.c.max_created),
+            isouter=True,
+        )
+    )
+
+    conditions = []
+    if user_id is not None:
+        conditions.append(Order.user_id == user_id)
+    if statuses:
+        conditions.append(Payment.status.in_(statuses))
+    if conditions:
+        base = base.where(and_(*conditions))
+
+    base = base.order_by(Order.created_at.desc())
+
+    # Count
+    count_query = select(func.count()).select_from(base.subquery())
+    total = (await db.execute(count_query)).scalar() or 0
+
+    # Data
+    if load_relationships:
+        base = base.options(
+            joinedload(Order.user),
+            selectinload(Order.items).selectinload(OrderItem.slipper),
+        )
+    rows = (await db.execute(base)).all()
+    return rows, total
 
 async def create_order(db: AsyncSession, order: OrderCreate) -> Order:
     """Create new order with items"""
