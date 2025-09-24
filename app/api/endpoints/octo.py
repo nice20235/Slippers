@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices
 from typing import Optional, Any, Dict
 from app.auth.dependencies import get_current_user, get_current_admin
 from app.services.octo import createPayment, refundPayment
@@ -9,15 +9,25 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 class CreatePaymentIn(BaseModel):
-    total_sum: int = Field(..., gt=0, description="Сумма платежа в тийинах (UZS)")
-    description: str = Field(..., max_length=255, description="Краткое описание товара/услуги")
-    
+    # Accept multiple common keys from frontend: amount/total/total_sum
+    total_sum: int = Field(
+        ..., gt=0,
+        description="Сумма платежа в тийинах (UZS)",
+        validation_alias=AliasChoices("total_sum", "amount", "total", "sum"),
+    )
+    # Accept description/desc/title
+    description: str = Field(
+        ..., max_length=255,
+        description="Краткое описание товара/услуги",
+        validation_alias=AliasChoices("description", "desc", "title"),
+    )
+
     model_config = {
         "json_schema_extra": {
-            "example": {
-                "total_sum": 125000,
-                "description": "Оплата заказа #123"
-            }
+            "examples": [
+                {"total_sum": 125000, "description": "Оплата заказа #123"},
+                {"amount": 125000, "desc": "Оплата заказа #123"},
+            ]
         }
     }
 
