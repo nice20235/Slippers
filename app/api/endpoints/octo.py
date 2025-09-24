@@ -191,9 +191,27 @@ async def octo_notify(request: Request, body: OctoNotifyIn, db: AsyncSession = D
     if not payment:
         logger.warning("Payment record not found for notify: shop_tx=%s uuid=%s", shop_tx, payment_uuid)
         return {"ok": True}
+
+    # If payment is not linked to an order, try to bind from payload (best-effort)
+    if getattr(payment, "order_id", None) is None:
+        try:
+            maybe_order_id = (
+                payload.get("order_id")
+                or payload.get("orderId")
+                or (payload.get("extra") or {}).get("orderId")
+            )
+            if maybe_order_id is not None:
+                payment.order_id = int(maybe_order_id)
+                db.add(payment)
+                await db.commit()
+                await db.refresh(payment)
+                logger.info("Linked payment %s to order_id=%s from notify payload", payment.id, payment.order_id)
+        except Exception as e:
+            logger.warning("Failed to link order_id from notify payload: %s", e)
     # Map external status to internal
     mapped = None
-    if status in {"paid", "success", "paid_and_captured"}:
+    # Normalize and map a broader set of success statuses
+    if status in {"paid", "success", "succeeded", "paid_and_captured", "captured", "completed"}:
         mapped = PaymentStatus.PAID
     elif status in {"refunded", "refund"}:
         mapped = PaymentStatus.REFUNDED
@@ -203,6 +221,14 @@ async def octo_notify(request: Request, body: OctoNotifyIn, db: AsyncSession = D
         mapped = PaymentStatus.CANCELLED
     else:
         mapped = PaymentStatus.PENDING
+
+    logger.info(
+        "Notify status '%s' mapped to %s (payment_id=%s, order_id=%s)",
+        status,
+        mapped,
+        getattr(payment, "id", None),
+        getattr(payment, "order_id", None),
+    )
     updated = await update_payment_status(
         db,
         payment,
@@ -214,8 +240,11 @@ async def octo_notify(request: Request, body: OctoNotifyIn, db: AsyncSession = D
     if mapped == PaymentStatus.PAID and getattr(updated, "order_id", None):
         try:
             await update_order_status(db, updated.order_id, OrderStatus.CONFIRMED)
+            logger.info("Order %s set to CONFIRMED due to successful payment %s", updated.order_id, updated.id)
         except Exception as e:
             logger.warning("Failed to update order %s status after payment: %s", updated.order_id, e)
+    elif mapped == PaymentStatus.PAID and not getattr(updated, "order_id", None):
+        logger.warning("Payment %s marked PAID but not linked to any order. Ensure orderId is sent on create.", getattr(updated, "id", None))
     # Invalidate caches so clients don't see stale 'pending' orders
     try:
         await invalidate_cache_pattern("orders:")
