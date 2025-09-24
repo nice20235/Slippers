@@ -16,6 +16,7 @@ from app.core.middleware import PerformanceMiddleware, CompressionHeaderMiddlewa
 from app.core.cache import cache
 from app.db.database import init_db, close_db
 from app.api.endpoints import users, slippers, orders, categories
+from app.api.endpoints import octo as octo_payments
 from app.api.endpoints.system import system_router
 from app.auth.routes import auth_router
 from app.schemas.responses import HealthCheckResponse, ErrorResponse
@@ -215,6 +216,7 @@ app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(categories.router, prefix="/categories", tags=["Categories"])
 app.include_router(slippers.router, prefix="/slippers", tags=["Slippers"])
 app.include_router(orders.router, prefix="/orders", tags=["Orders"])
+app.include_router(octo_payments.router, prefix="/payments/octo", tags=["Payments (OCTO)"])
 app.include_router(system_router, prefix="/system", tags=["System"])
 
 # Serve static files (images, etc.)
