@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     # CALLBACK_BASIC_AUTH_USERNAME and CALLBACK_BASIC_AUTH_PASSWORD removed (payment system)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    SESSION_MAX_DAYS: int = 1  # Absolute maximum session lifetime (sliding disabled past this). 0 disables hard cap.
+    SESSION_MAX_HOURS: int = 0  # Alternative to DAYS. If >0, hours takes precedence.
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,https://www.optomoyoqkiyim.uz/"
     LOGIN_RATE_LIMIT: int = 5  # попыток
     LOGIN_RATE_WINDOW_SEC: int = 300  # окно в секундах (5 минут)

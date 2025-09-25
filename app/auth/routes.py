@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
-from app.auth.jwt import create_access_token, create_refresh_token, decode_refresh_token
+from app.auth.jwt import create_access_token, create_refresh_token, decode_refresh_token, _calc_session_exp
 from app.crud.user import create_user, authenticate_user, get_user_by_name, get_user_by_phone_number, get_user, update_user_password
 from app.schemas.user import UserCreate, UserLogin, RefreshTokenRequest, UserResponse, ForgotPasswordRequest
 
 import logging
+from datetime import datetime
 import time
 from collections import defaultdict, deque
 from app.core.config import settings
@@ -58,9 +59,11 @@ async def register_user(
     # Create new user
     user = await create_user(db, user_data)
     logger.info(f"Created new user: {user.name} ({user.phone_number})")
+    # Calculate absolute session expiration
+    now_session_exp = _calc_session_exp(datetime.utcnow())
     # Create tokens
-    access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    access_token = create_access_token(data={"sub": str(user.id)}, session_exp=now_session_exp)
+    refresh_token = create_refresh_token(data={"sub": str(user.id)}, session_exp=now_session_exp)
     # Return tokens via response headers
     if response is not None:
         response.headers["Authorization"] = f"Bearer {access_token}"
@@ -98,9 +101,10 @@ async def login_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect name or password"
         )
-    # Create tokens
-    access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    # Absolute session expiration on first login
+    now_session_exp = _calc_session_exp(datetime.utcnow())
+    access_token = create_access_token(data={"sub": str(user.id)}, session_exp=now_session_exp)
+    refresh_token = create_refresh_token(data={"sub": str(user.id)}, session_exp=now_session_exp)
     # Return tokens via response headers
     if response is not None:
         response.headers["Authorization"] = f"Bearer {access_token}"
@@ -143,9 +147,18 @@ async def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token"
         )
-    # Create new tokens
-    access_token = create_access_token(data={"sub": str(user.id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.id)})
+    # Preserve original absolute session expiration if present
+    sess_exp_ts = payload.get("sess_exp")
+    if sess_exp_ts:
+        sess_exp_dt = datetime.utcfromtimestamp(int(sess_exp_ts))
+        if datetime.utcnow() >= sess_exp_dt:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired. Please log in again.")
+    else:
+        sess_exp_dt = _calc_session_exp(datetime.utcnow())
+
+    # Create new tokens but do NOT extend sess_exp
+    access_token = create_access_token(data={"sub": str(user.id)}, session_exp=sess_exp_dt)
+    refresh_token = create_refresh_token(data={"sub": str(user.id)}, session_exp=sess_exp_dt)
     # Return tokens via response headers
     if response is not None:
         response.headers["Authorization"] = f"Bearer {access_token}"
