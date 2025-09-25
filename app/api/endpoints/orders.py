@@ -100,18 +100,33 @@ async def list_orders(
             # rows are tuples (order, payment_status)
             result = []
             for order, pay_status in rows:
-                result.append(
-                    {
-                        "id": order.id,
-                        "user_id": order.user_id,
-                        "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
-                        "status": order.status.value,
-                        "payment_status": "success" if pay_status == PaymentStatus.PAID else ("refunded" if pay_status == PaymentStatus.REFUNDED else None),
-                        "total_amount": order.total_amount,
-                        "created_at": order.created_at.isoformat(),
-                        "updated_at": order.updated_at.isoformat() if order.updated_at else None,
-                    }
-                )
+                result.append({
+                    "id": order.id,
+                    "order_id": order.order_id,
+                    "user_id": order.user_id,
+                    "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
+                    "status": order.status.value,
+                    "payment_status": (
+                        "success" if pay_status == PaymentStatus.PAID else (
+                            "refunded" if pay_status == PaymentStatus.REFUNDED else None
+                        )
+                    ),
+                    "total_amount": order.total_amount,
+                    "created_at": order.created_at.isoformat(),
+                    "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+                    "items": [
+                        {
+                            "slipper_id": item.slipper_id,
+                            "quantity": item.quantity,
+                            "unit_price": item.unit_price,
+                            "total_price": item.total_price,
+                            "name": item.slipper.name if item.slipper else None,
+                            "size": item.slipper.size if item.slipper else None,
+                            "image": item.slipper.image if item.slipper else None,
+                        }
+                        for item in (order.items or [])
+                    ],
+                })
             return result
         else:
             if user.is_admin:
@@ -124,12 +139,25 @@ async def list_orders(
             return [
                 {
                     "id": order.id,
+                    "order_id": order.order_id,
                     "user_id": order.user_id,
                     "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
                     "status": order.status.value,
                     "total_amount": order.total_amount,
                     "created_at": order.created_at.isoformat(),
                     "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+                    "items": [
+                        {
+                            "slipper_id": item.slipper_id,
+                            "quantity": item.quantity,
+                            "unit_price": item.unit_price,
+                            "total_price": item.total_price,
+                            "name": item.slipper.name if item.slipper else None,
+                            "size": item.slipper.size if item.slipper else None,
+                            "image": item.slipper.image if item.slipper else None,
+                        }
+                        for item in (order.items or [])
+                    ],
                 }
                 for order in orders
             ]
