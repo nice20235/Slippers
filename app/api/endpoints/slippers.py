@@ -151,7 +151,7 @@ async def create_new_slipper(
 		if not category:
 			raise HTTPException(status_code=404, detail="Category not found")
 
-	from app.models.food import Slipper
+	from app.models.slipper import Slipper
 	db_slipper = Slipper(
 		name=slipper.name,
 		size=slipper.size,
@@ -250,7 +250,7 @@ async def upload_slipper_images(
 	current_admin: dict = Depends(get_current_admin),
 ):
 	"""Upload one or many images for a slipper. First image becomes main image if not set."""
-	from app.models.food import SlipperImage
+	from app.models.slipper import SlipperImage
 	slipper = await get_slipper(db, slipper_id=slipper_id)
 	if not slipper:
 		raise HTTPException(status_code=404, detail="Slipper not found")
@@ -313,7 +313,7 @@ async def get_slipper_images(
 	slipper_id: int, db: AsyncSession = Depends(get_db)
 ):
 	"""Получить все изображения для конкретной тапочки."""
-	from app.models.food import SlipperImage
+	from app.models.slipper import SlipperImage
 	from sqlalchemy import select, asc
 
 	slipper = await get_slipper(db, slipper_id=slipper_id)
@@ -352,7 +352,7 @@ async def delete_slipper_image(
 	current_admin: dict = Depends(get_current_admin),
 ):
 	"""Удалить конкретное изображение тапочки."""
-	from app.models.food import SlipperImage
+	from app.models.slipper import SlipperImage
 	from sqlalchemy import select
 
 	result = await db.execute(

@@ -176,3 +176,26 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python
 
 slippers.db
+slippers.db-journal
+*.sqlite
+*.sqlite-journal
+
+# Local environment & secrets
+.env.local
+.env.prod
+.env.backup
+
+# Logs
+logs/
+*.log
+
+# Uploaded media (keep if not using external storage)
+app/static/images/*.tmp
+
+# Alembic/migrations cache (if added later)
+alembic.ini.bak
+migrations/versions/__pycache__/
+
+# Editor settings
+.vscode/
+*.code-workspace

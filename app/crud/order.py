@@ -3,7 +3,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy import func, and_
 from app.models.order import Order, OrderItem, OrderStatus
-from app.models.food import Slipper
+from app.models.slipper import Slipper
 from app.schemas.order import OrderCreate, OrderUpdate, OrderItemCreate
 from typing import Optional, List, Tuple
 import logging

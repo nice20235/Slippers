@@ -2,7 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy import func, and_, or_
-from app.models.food import Slipper, Category
+from app.models.slipper import Slipper, Category
 from app.schemas.slipper import SlipperCreate, SlipperUpdate
 from app.schemas.category import CategoryCreate, CategoryUpdate
 from typing import Optional, List, Tuple

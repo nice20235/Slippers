@@ -14,21 +14,19 @@ sys.path.append(str(Path(__file__).parent))
 from app.db.database import init_db, AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud.user import create_user, promote_to_admin
-from app.crud.food import create_category, create_food
+from app.crud.slipper import create_category, create_slipper
 from app.schemas.user import UserCreate
 from app.schemas.category import CategoryCreate
-from app.schemas.slipper import SlipperCreate as FoodCreate
+from app.schemas.slipper import SlipperCreate
 
 # Sample data
 SAMPLE_CATEGORIES = [
-    {"name": "Appetizers", "description": "Start your meal with our delicious appetizers"},
-    {"name": "Main Courses", "description": "Our signature main dishes"},
-    {"name": "Desserts", "description": "Sweet endings to your meal"},
-    {"name": "Beverages", "description": "Refreshing drinks and beverages"},
-    {"name": "Salads", "description": "Fresh and healthy salad options"},
+    {"name": "Men", "description": "Men's slippers"},
+    {"name": "Women", "description": "Women's slippers"},
+    {"name": "Kids", "description": "Children's slippers"},
 ]
 
-SAMPLE_FOODS = [
+SAMPLE_SLIPPERS = [
     {"image": "https://example.com/slippers/men1.jpg", "name": "Men Classic Slipper", "size": "42", "price": 19.99, "quantity": 25, "category_name": "Men"},
     {"image": "https://example.com/slippers/women1.jpg", "name": "Women Cozy Slipper", "size": "38", "price": 21.99, "quantity": 30, "category_name": "Women"},
     {"image": "https://example.com/slippers/kids1.jpg", "name": "Kids Fun Slipper", "size": "30", "price": 14.99, "quantity": 40, "category_name": "Kids"},
@@ -47,21 +45,21 @@ async def create_sample_categories(db: AsyncSession):
     
     return categories
 
-async def create_sample_foods(db: AsyncSession, categories):
-    """Create sample foods"""
+async def create_sample_slippers(db: AsyncSession, categories):
+    """Create sample slippers"""
     print("👟 Creating sample slippers...")
     
-    for food_data in SAMPLE_FOODS:
-        category_name = food_data.pop("category_name")
+    for slip_data in SAMPLE_SLIPPERS:
+        category_name = slip_data.pop("category_name")
         category = categories.get(category_name)
         
         if category:
-            food_data["category_id"] = category.id
-            food = FoodCreate(**food_data)
-            db_food = await create_food(db, food)
-            print(f"  ✅ Created slipper: {db_food.name} (${db_food.price}) size {db_food.size}")
+            slip_data["category_id"] = category.id
+            slipper_obj = SlipperCreate(**slip_data)
+            db_slipper = await create_slipper(db, slipper_obj.model_dump())
+            print(f"  ✅ Created slipper: {db_slipper.name} (${db_slipper.price}) size {db_slipper.size}")
         else:
-            print(f"  ⚠️  Category '{category_name}' not found for slipper: {food_data['name']}")
+            print(f"  ⚠️  Category '{category_name}' not found for slipper: {slip_data['name']}")
 
 async def create_admin_user(db: AsyncSession):
     """Create default admin user"""
@@ -118,8 +116,8 @@ async def main():
             # Create categories
             categories = await create_sample_categories(db)
             
-            # Create foods
-            await create_sample_foods(db, categories)
+            # Create slippers
+            await create_sample_slippers(db, categories)
             
             # Create admin user
             admin_user = await create_admin_user(db)
@@ -129,7 +127,7 @@ async def main():
         print("\n📋 Summary:")
         print(f"  • Database: slippers.db")
         print(f"  • Categories: {len(categories)}")
-        print(f"  • Slippers: {len(SAMPLE_FOODS)}")
+        print(f"  • Slippers: {len(SAMPLE_SLIPPERS)}")
         if admin_user:
             print(f"  • Admin user: {admin_user.name} {admin_user.surname}")
         else:

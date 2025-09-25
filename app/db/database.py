@@ -86,12 +86,11 @@ async def init_db():
     """Initialize database tables"""
     async with engine.begin() as conn:
         # Import all models to ensure they're registered
-        from app.models.user import User
-        from app.models.food import Slipper, Category, SlipperImage
-        from app.models.order import Order, OrderItem
-        from app.models.payment import Payment
-        
-        # Create all tables
+        from app.models.user import User  # noqa: F401
+        from app.models.slipper import Slipper, Category, SlipperImage  # noqa: F401
+        from app.models.order import Order, OrderItem  # noqa: F401
+        from app.models.payment import Payment  # noqa: F401
+
         await conn.run_sync(Base.metadata.create_all)
         print("✅ Database tables created successfully!")
 

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.models.user import User
-    from app.models.food import Slipper
+    from app.models.slipper import Slipper
 
 class OrderStatus(str, enum.Enum):
     PENDING = "pending"

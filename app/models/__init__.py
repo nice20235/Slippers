@@ -1,1 +1,1 @@
-from . import user, order, food, payment
+from . import user, order, slipper, payment
