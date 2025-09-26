@@ -16,6 +16,7 @@ from app.core.middleware import PerformanceMiddleware, CompressionHeaderMiddlewa
 from app.core.cache import cache
 from app.db.database import init_db, close_db
 from app.api.endpoints import users, slippers, orders, categories
+from app.api.endpoints import cart as cart_router
 from app.api.endpoints import octo as octo_payments
 from app.api.endpoints.system import system_router
 from app.auth.routes import auth_router
@@ -217,6 +218,8 @@ app.include_router(categories.router, prefix="/categories", tags=["Categories"])
 app.include_router(slippers.router, prefix="/slippers", tags=["Slippers"])
 app.include_router(orders.router, prefix="/orders", tags=["Orders"])
 app.include_router(octo_payments.router, prefix="/payments/octo", tags=["Payments (OCTO)"])
+# Cart router already defines its tag; avoid re-specifying to prevent duplicates
+app.include_router(cart_router.router)
 app.include_router(system_router, prefix="/system", tags=["System"])
 
 # Serve static files (images, etc.)

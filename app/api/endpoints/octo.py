@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Body
-from pydantic import BaseModel, Field, AliasChoices
+from pydantic import BaseModel, Field
 from typing import Optional, Any, Dict
 from app.auth.dependencies import get_current_user, get_current_admin
 from app.services.octo import createPayment, refundPayment
@@ -16,35 +16,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 class CreatePaymentIn(BaseModel):
-    # Accept multiple common keys from frontend: amount/total/total_sum
-    total_sum: int = Field(
-        ..., gt=0,
-        description="Сумма платежа в тийинах (UZS)",
-        validation_alias=AliasChoices("total_sum", "amount", "total", "sum"),
-    )
-    # Accept description/desc/title
-    description: str = Field(
-        ..., max_length=255,
-        description="Краткое описание товара/услуги",
-        validation_alias=AliasChoices("description", "desc", "title"),
-    )
-    # Optional link to an existing order
-    order_id: Optional[int] = Field(
-        None,
-        ge=1,
-        description="ID заказа для связывания платежа",
-        validation_alias=AliasChoices("order_id", "orderId", "order"),
-    )
-
+    order_id: int = Field(..., ge=1, description="ID заказа (internal numeric primary key)")
     model_config = {
         "json_schema_extra": {
-            # Keep model examples for schema generators; we'll also set Body examples in the route
-            "example": {"total_sum": 125000, "description": "Оплата заказа #123", "orderId": 2},
-            "examples": [
-                {"total_sum": 125000, "description": "Оплата заказа #123"},
-                {"amount": 125000, "desc": "Оплата заказа #123"},
-                {"amount": 125000, "title": "Оплата заказа #123", "orderId": 2}
-            ]
+            "example": {"order_id": 2},
         }
     }
 
@@ -71,7 +46,7 @@ class RefundOut(BaseModel):
     success: bool
     message: Optional[str] = None
 
-@router.post("/create", response_model=CreatePaymentOut, summary="Create Octo Payment", responses={
+@router.post("/create", response_model=CreatePaymentOut, summary="Create Octo Payment (by order only)", responses={
     200: {
         "description": "Ссылка на оплату создана",
         "content": {
@@ -93,28 +68,20 @@ class RefundOut(BaseModel):
     }
 })
 async def create_octo_payment(
-    body: CreatePaymentIn = Body(
-        ...,
-        example={
-            "total_sum": 125000,
-            "description": "Оплата заказа #123",
-            "orderId": 2,
-        },
-        examples={
-            "basic": {
-                "summary": "Minimal",
-                "value": {"total_sum": 125000, "description": "Оплата заказа #123"},
-            },
-            "withAliases": {
-                "summary": "Using aliases",
-                "value": {"amount": 125000, "title": "Оплата заказа #123", "orderId": 2},
-            },
-        },
-    ),
+    body: CreatePaymentIn = Body(..., example={"order_id": 2}),
     user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    res = await createPayment(body.total_sum, body.description)
+    # Load order to derive amount & description
+    from app.crud.order import get_order
+    order = await get_order(db, body.order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    total_sum = int(round(order.total_amount))
+    if total_sum <= 0:
+        raise HTTPException(status_code=400, detail="Order total is zero; cannot create payment")
+    description = f"Оплата заказа #{order.order_id}" if getattr(order, 'order_id', None) else f"Оплата заказа {order.id}"
+    res = await createPayment(total_sum, description)
     if not res.success or not res.octo_pay_url:
         logger.warning("OCTO createPayment failed: %s", res.errMessage)
         raise HTTPException(status_code=400, detail=res.errMessage or "OCTO error")
@@ -124,7 +91,7 @@ async def create_octo_payment(
             await create_payment(
                 db,
                 shop_transaction_id=res.shop_transaction_id,
-                amount=float(body.total_sum),
+                amount=float(total_sum),
                 currency="UZS",
                 order_id=body.order_id,
                 octo_payment_uuid=res.octo_payment_UUID,

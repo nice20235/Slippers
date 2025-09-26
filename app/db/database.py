@@ -89,8 +89,8 @@ async def init_db():
         from app.models.user import User  # noqa: F401
         from app.models.slipper import Slipper, Category, SlipperImage  # noqa: F401
         from app.models.order import Order, OrderItem  # noqa: F401
+        from app.models.cart import Cart, CartItem  # noqa: F401
         from app.models.payment import Payment  # noqa: F401
-
         await conn.run_sync(Base.metadata.create_all)
         print("✅ Database tables created successfully!")
 
