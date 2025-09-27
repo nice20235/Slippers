@@ -18,7 +18,6 @@ from app.db.database import init_db, close_db
 from app.api.endpoints import users, slippers, orders, categories
 from app.api.endpoints import cart as cart_router
 from app.api.endpoints import octo as octo_payments
-from app.api.endpoints.system import system_router
 from app.auth.routes import auth_router
 from app.schemas.responses import HealthCheckResponse, ErrorResponse
 
@@ -128,7 +127,7 @@ app = FastAPI(
         {"name": "Slippers", "description": "Slipper catalog and image management"},
         {"name": "Orders", "description": "Order processing and tracking"},
         {"name": "Categories", "description": "Product category management"},
-        {"name": "System", "description": "System health and monitoring"},
+    # System diagnostics removed for simplification; keep /health only
     ],
     # Enable docs for development
     docs_url="/docs",
@@ -220,7 +219,7 @@ app.include_router(orders.router, prefix="/orders", tags=["Orders"])
 app.include_router(octo_payments.router, prefix="/payments/octo", tags=["Payments (OCTO)"])
 # Cart router already defines its tag; avoid re-specifying to prevent duplicates
 app.include_router(cart_router.router)
-app.include_router(system_router, prefix="/system", tags=["System"])
+# System diagnostics router removed
 
 # Serve static files (images, etc.)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
