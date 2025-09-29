@@ -100,7 +100,7 @@ class OrderPublic(BaseModel):
 class OrderBase(BaseModel):
     order_id: str = Field(..., description="Unique order identifier", min_length=1, max_length=32)
     user_id: int = Field(..., description="User ID", gt=0)
-    status: OrderStatus = Field(default=OrderStatus.PENDING, description="Order status (pending|paid)")
+    status: OrderStatus = Field(default=OrderStatus.PENDING, description="Order status (PENDING|PAID|REFUNDED)")
     total_amount: float = Field(default=0.0, description="Total order amount", ge=0)
     notes: Optional[str] = Field(None, description="Order notes", max_length=500)
 

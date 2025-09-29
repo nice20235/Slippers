@@ -95,7 +95,7 @@ async def init_db():
         print("✅ Database tables created successfully!")
 
         # --- Legacy status normalization (idempotent) ---
-        # We simplified OrderStatus to: pending, paid, refunded.
+    # We simplified OrderStatus to: PENDING, PAID, REFUNDED (uppercase stored values).
         # Older records may still hold: confirmed, preparing, ready, delivered, cancelled.
         # Map them as follows:
         #   confirmed/preparing/ready/delivered -> paid (they indicate post-payment states)
@@ -104,17 +104,16 @@ async def init_db():
         try:
             # Normalize to lowercase first (defensive) then map.
             await conn.exec_driver_sql("""
-                UPDATE orders SET status=LOWER(status)
-                WHERE status GLOB '*[A-Z]*';
+                UPDATE orders SET status=UPPER(status);
             """)
             await conn.exec_driver_sql("""
-                UPDATE orders SET status='paid' WHERE status IN ('confirmed','preparing','ready','delivered');
+                UPDATE orders SET status='PAID' WHERE status IN ('confirmed','preparing','ready','delivered','paid');
             """)
             await conn.exec_driver_sql("""
-                UPDATE orders SET status='pending' WHERE status IN ('cancelled');
+                UPDATE orders SET status='PENDING' WHERE status IN ('cancelled','pending');
             """)
             await conn.exec_driver_sql("""
-                UPDATE orders SET status='pending' WHERE status NOT IN ('pending','paid','refunded');
+                UPDATE orders SET status='PENDING' WHERE status NOT IN ('PENDING','PAID','REFUNDED');
             """)
             logger.info("✅ Order status normalization completed")
         except Exception as e:

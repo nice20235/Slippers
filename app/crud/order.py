@@ -158,7 +158,7 @@ async def create_order(db: AsyncSession, order: OrderCreate) -> Order:
         user_id=order.user_id,
         total_amount=total_amount,
         notes=order.notes,
-        status="pending"
+        status=OrderStatus.PENDING
     )
     db.add(db_order)
     await db.flush()  # obtain primary key

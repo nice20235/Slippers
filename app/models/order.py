@@ -11,19 +11,15 @@ if TYPE_CHECKING:
 
 class OrderStatus(str, enum.Enum):
     """Supported order statuses (simplified per requirement):
-    - pending: order created, not yet paid
-    - paid: payment confirmed
-    - refunded: payment fully returned
+    - PENDING  : order created, not yet paid
+    - PAID     : payment confirmed
+    - REFUNDED : payment fully returned
 
-    All previous intermediate statuses (confirmed, preparing, ready, delivered, cancelled)
-    have been removed per request. If legacy rows exist with those values, run a one-time
-    data normalization, e.g.:
-        UPDATE orders SET status='pending' WHERE status NOT IN ('pending','paid');
-    before deploying this change in production to avoid enum validation issues.
+    Stored values now use uppercase for strict Enum alignment.
     """
-    PENDING = "pending"
-    PAID = "paid"
-    REFUNDED = "refunded"
+    PENDING = "PENDING"
+    PAID = "PAID"
+    REFUNDED = "REFUNDED"
 
 class Order(Base):
     __tablename__ = "orders"
