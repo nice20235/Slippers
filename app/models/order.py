@@ -13,6 +13,7 @@ class OrderStatus(str, enum.Enum):
     """Supported order statuses (simplified per requirement):
     - pending: order created, not yet paid
     - paid: payment confirmed
+    - refunded: payment fully returned
 
     All previous intermediate statuses (confirmed, preparing, ready, delivered, cancelled)
     have been removed per request. If legacy rows exist with those values, run a one-time
@@ -22,6 +23,7 @@ class OrderStatus(str, enum.Enum):
     """
     PENDING = "pending"
     PAID = "paid"
+    REFUNDED = "refunded"
 
 class Order(Base):
     __tablename__ = "orders"
