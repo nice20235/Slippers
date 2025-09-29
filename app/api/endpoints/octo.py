@@ -46,6 +46,81 @@ class RefundOut(BaseModel):
     success: bool
     message: Optional[str] = None
 
+# ---------------- Simplified required endpoints (hide payment_uuid) ----------------
+class OctoPayCreateIn(BaseModel):
+    order_id: int = Field(..., gt=0)
+
+class OctoPayCreateOut(BaseModel):
+    order_id: int
+    redirect_url: str
+
+class OctoPayRefundIn(BaseModel):
+    order_id: int = Field(..., gt=0)
+
+class OctoPayRefundOut(BaseModel):
+    order_id: int
+    status: str
+
+@router.post("/create-payment", response_model=OctoPayCreateOut, summary="Create payment (OctoPay mock)")
+async def octopay_create_payment(body: OctoPayCreateIn, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    from app.crud.order import get_order, update_order_payment_uuid
+    order = await get_order(db, body.order_id, load_relationships=False)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    # Mock external call using httpx (wrapped in try/except); fall back to fabricated data if fails
+    import httpx
+    amount = int(round(order.total_amount))
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Order total is zero; cannot create payment")
+    payload = {"order_id": order.id, "amount": amount}
+    payment_uuid = None
+    redirect_url = None
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post("https://api.octopay.local/create", json=payload)
+        if resp.status_code < 400:
+            data = resp.json()
+            payment_uuid = data.get("payment_uuid")
+            redirect_url = data.get("redirect_url")
+    except Exception as e:
+        logger.warning("Mock OctoPay create error (fallback to fabricated): %s", e)
+    if not payment_uuid:
+        # Fabricate mock identifiers
+        import uuid
+        payment_uuid = f"mock-{uuid.uuid4()}"
+    if not redirect_url:
+        redirect_url = f"https://octopay.local/pay/{payment_uuid}"
+    # Store payment_uuid internally (never expose it)
+    try:
+        await update_order_payment_uuid(db, order.id, payment_uuid)
+    except Exception as e:
+        logger.warning("Failed to persist payment_uuid for order %s: %s", order.id, e)
+    return OctoPayCreateOut(order_id=order.id, redirect_url=redirect_url)
+
+@router.post("/refund-payment", response_model=OctoPayRefundOut, summary="Refund payment (OctoPay mock)")
+async def octopay_refund_payment(body: OctoPayRefundIn, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
+    from app.crud.order import get_order, update_order_status
+    order = await get_order(db, body.order_id, load_relationships=False)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status == OrderStatus.REFUNDED:
+        raise HTTPException(status_code=400, detail="Order already refunded")
+    if not getattr(order, 'payment_uuid', None):
+        raise HTTPException(status_code=400, detail="Order has no payment_uuid; cannot refund")
+    # Mock external refund call
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post("https://api.octopay.local/refund", json={"payment_uuid": order.payment_uuid})
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=400, detail="OctoPay refund error")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Mock OctoPay refund error (continuing anyway for dev): %s", e)
+    await update_order_status(db, order.id, OrderStatus.REFUNDED)
+    return OctoPayRefundOut(order_id=order.id, status=OrderStatus.REFUNDED.value)
+
 @router.post("/create", response_model=CreatePaymentOut, summary="Create Octo Payment (by order only)", responses={
     200: {
         "description": "Ссылка на оплату создана",

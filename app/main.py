@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.core.middleware import PerformanceMiddleware, CompressionHeaderMiddleware, SecurityHeadersMiddleware
 from app.core.cache import cache
 from app.db.database import init_db, close_db
-from app.api.endpoints import users, slippers, orders, categories, fastlypay
+from app.api.endpoints import users, slippers, orders, categories
 from app.api.endpoints import cart as cart_router
 from app.api.endpoints import octo as octo_payments
 from app.auth.routes import auth_router
@@ -217,7 +217,6 @@ app.include_router(categories.router, prefix="/categories", tags=["Categories"])
 app.include_router(slippers.router, prefix="/slippers", tags=["Slippers"])
 app.include_router(orders.router, prefix="/orders", tags=["Orders"])
 app.include_router(octo_payments.router, prefix="/payments/octo", tags=["Payments (OCTO)"])
-app.include_router(fastlypay.router, prefix="/fastlypay", tags=["FastlyPay"])
 # Cart router already defines its tag; avoid re-specifying to prevent duplicates
 app.include_router(cart_router.router)
 # System diagnostics router removed

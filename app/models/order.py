@@ -65,6 +65,7 @@ class Order(Base):
     Index('idx_orders_created', 'created_at'),
     Index('idx_orders_updated', 'updated_at'),
     Index('idx_orders_order_id', 'order_id'),
+    Index('idx_orders_payment_uuid', 'payment_uuid'),
     # Composite indexes for common queries
     Index('idx_orders_user_status', 'user_id', 'status'),
     Index('idx_orders_user_created', 'user_id', 'created_at'),
