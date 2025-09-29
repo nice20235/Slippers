@@ -63,6 +63,12 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Order not found")
     if order.status == OrderStatus.REFUNDED:
         raise HTTPException(status_code=400, detail="Cannot create payment for refunded order")
+    # Idempotency: if order already has a payment_uuid and still pending, just reuse
+    if order.payment_uuid:
+        existing_payment_uuid = order.payment_uuid
+        # Try find existing payment record to reconstruct redirect (cannot fetch if not stored; return 409 style?)
+        # For simplicity, continue to allow new creation if user explicitly wants another attempt and old payment maybe failed.
+        logger.info("Order %s already has payment_uuid %s", order.id, existing_payment_uuid)
     amount = int(round(order.total_amount))
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Order total is zero; cannot create payment")
@@ -90,7 +96,7 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
         payment_uuid = data_section.get("octo_payment_UUID") or data_section.get("payment_uuid")
     if not payment_uuid:
         logger.warning("OCTO response missing payment UUID for order %s", order.id)
-    if payment_uuid:
+    if payment_uuid and not order.payment_uuid:
         try:
             await update_order_payment_uuid(db, order.id, payment_uuid)
         except Exception as e:

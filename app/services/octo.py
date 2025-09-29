@@ -11,7 +11,7 @@ from app.core.config import settings
 class OctoPrepareResponse(BaseModel):
     success: bool
     shop_transaction_id: Optional[str] = None
-    octo_payment_UUID: Optional[str] = None
+    octo_payment_UUID: Optional[str] = None  # normalized primary field used by endpoint
     octo_pay_url: Optional[str] = None
     error: Optional[int] = None
     errMessage: Optional[str] = None
@@ -30,6 +30,30 @@ def _make_signature(payload: Dict[str, Any], secret: str) -> str:
     return hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
 
 # ----- Public API -----
+def _extract_payment_uuid(data: Dict[str, Any]) -> Optional[str]:
+    """Extract payment UUID from heterogeneous OCTO responses.
+    Accepts variants like: octo_payment_UUID, octo_payment_uuid, payment_uuid (any case), nested in data{}.
+    """
+    if not data:
+        return None
+    # Flatten top-level + data section
+    candidates = []
+    top = data
+    inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+    merged_sources = [top, inner]
+    for source in merged_sources:
+        for k, v in source.items():
+            if not isinstance(v, str):
+                continue
+            kl = k.lower()
+            if "payment" in kl and "uuid" in kl:
+                candidates.append(v)
+    # Return first non-empty UUID-like (simple length >= 8)
+    for c in candidates:
+        if c and len(c) >= 8:
+            return c
+    return None
+
 async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse:
     """
     Create payment via OCTO prepare_payment (one-stage, auto_capture).
@@ -111,10 +135,19 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
             raw=data,
         )
     d = data.get("data") or {}
+    payment_uuid = (
+        data.get("octo_payment_UUID")
+        or d.get("octo_payment_UUID")
+        or data.get("octo_payment_uuid")
+        or d.get("octo_payment_uuid")
+        or data.get("payment_uuid")
+        or d.get("payment_uuid")
+        or _extract_payment_uuid(data)
+    )
     return OctoPrepareResponse(
         success=True,
         shop_transaction_id=shop_transaction_id,
-        octo_payment_UUID=data.get("octo_payment_UUID") or d.get("octo_payment_UUID"),
+        octo_payment_UUID=payment_uuid,
         octo_pay_url=data.get("octo_pay_url") or d.get("octo_pay_url"),
         raw=data,
     )
