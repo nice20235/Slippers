@@ -10,12 +10,18 @@ if TYPE_CHECKING:
     from app.models.slipper import Slipper
 
 class OrderStatus(str, enum.Enum):
+    """Supported order statuses (simplified per requirement):
+    - pending: order created, not yet paid
+    - paid: payment confirmed
+
+    All previous intermediate statuses (confirmed, preparing, ready, delivered, cancelled)
+    have been removed per request. If legacy rows exist with those values, run a one-time
+    data normalization, e.g.:
+        UPDATE orders SET status='pending' WHERE status NOT IN ('pending','paid');
+    before deploying this change in production to avoid enum validation issues.
+    """
     PENDING = "pending"
-    CONFIRMED = "confirmed"
-    PREPARING = "preparing"
-    READY = "ready"
-    DELIVERED = "delivered"
-    CANCELLED = "cancelled"
+    PAID = "paid"
 
 class Order(Base):
     __tablename__ = "orders"
@@ -36,7 +42,7 @@ class Order(Base):
     )
     total_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     notes: Mapped[str] = mapped_column(String(500), nullable=True)
-    # transfer_id field removed (was used for payment integration)
+    # (payment integration fields trimmed; only status + total retained)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), 
         server_default=func.now(),

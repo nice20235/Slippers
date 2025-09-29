@@ -98,14 +98,14 @@ class OrderPublic(BaseModel):
 
 # Order schemas
 class OrderBase(BaseModel):
-    order_id: str = Field(..., description="Unique order identifier", min_length=8, max_length=32)
+    order_id: str = Field(..., description="Unique order identifier", min_length=1, max_length=32)
     user_id: int = Field(..., description="User ID", gt=0)
-    status: OrderStatus = Field(default=OrderStatus.PENDING, description="Order status")
+    status: OrderStatus = Field(default=OrderStatus.PENDING, description="Order status (pending|paid)")
     total_amount: float = Field(default=0.0, description="Total order amount", ge=0)
     notes: Optional[str] = Field(None, description="Order notes", max_length=500)
 
 class OrderCreate(BaseModel):
-    order_id: Optional[str] = Field(None, description="Unique order identifier (auto-generated)", min_length=8, max_length=32)
+    order_id: Optional[str] = Field(None, description="Unique order identifier (auto-generated)", min_length=1, max_length=32)
     user_id: int = Field(..., description="User ID", gt=0)
     items: List[OrderItemCreate] = Field(..., description="Order items", min_items=1)
     notes: Optional[str] = Field(None, description="Order notes", max_length=500)

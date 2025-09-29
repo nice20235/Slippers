@@ -203,11 +203,11 @@ async def octo_notify(request: Request, body: OctoNotifyIn, db: AsyncSession = D
         octo_payment_uuid=payment_uuid,
         raw=str(payload)[:3900],
     )
-    # If this payment is linked to an order and got paid, confirm the order
+    # If this payment is linked to an order and got paid, mark the order as PAID
     if mapped == PaymentStatus.PAID and getattr(updated, "order_id", None):
         try:
-            await update_order_status(db, updated.order_id, OrderStatus.CONFIRMED)
-            logger.info("Order %s set to CONFIRMED due to successful payment %s", updated.order_id, updated.id)
+            await update_order_status(db, updated.order_id, OrderStatus.PAID)
+            logger.info("Order %s set to PAID due to successful payment %s", updated.order_id, updated.id)
         except Exception as e:
             logger.warning("Failed to update order %s status after payment: %s", updated.order_id, e)
     elif mapped == PaymentStatus.PAID and not getattr(updated, "order_id", None):
