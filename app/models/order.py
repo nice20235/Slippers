@@ -40,6 +40,7 @@ class Order(Base):
     )
     total_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     notes: Mapped[str] = mapped_column(String(500), nullable=True)
+    payment_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # (payment integration fields trimmed; only status + total retained)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), 
