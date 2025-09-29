@@ -115,12 +115,19 @@ async def create_octo_payment(
         "content": {"application/json": {"example": {"detail": "Minimum refund is >= 13000 UZS (1 USD)"}}}
     }
 })
-async def refund_octo_payment(body: RefundIn, admin=Depends(get_current_admin)):
+async def refund_octo_payment(body: RefundIn, admin=Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
     res = await refundPayment(body.payment_uuid, body.amount)
     if not res.success:
         logger.warning("OCTO refund failed: %s", res.errMessage)
         raise HTTPException(status_code=400, detail=res.errMessage or "OCTO error")
-    return RefundOut(success=True, message="Refund initiated")
+    payment = await get_payment_by_uuid(db, body.payment_uuid)
+    if payment and getattr(payment, "order_id", None):
+        try:
+            await update_order_status(db, payment.order_id, OrderStatus.REFUNDED)
+            logger.info("Order %s set to REFUNDED after refund of payment %s", payment.order_id, payment.id)
+        except Exception as e:
+            logger.warning("Failed to update order status to REFUNDED: %s", e)
+    return RefundOut(success=True, message="Refund initiated; order marked refunded if linked")
 
 # Optional: minimal notify webhook to satisfy notify_url requirement
 class OctoNotifyIn(BaseModel):
@@ -203,14 +210,21 @@ async def octo_notify(request: Request, body: OctoNotifyIn, db: AsyncSession = D
         octo_payment_uuid=payment_uuid,
         raw=str(payload)[:3900],
     )
-    # If this payment is linked to an order and got paid, mark the order as PAID
-    if mapped == PaymentStatus.PAID and getattr(updated, "order_id", None):
-        try:
-            await update_order_status(db, updated.order_id, OrderStatus.PAID)
-            logger.info("Order %s set to PAID due to successful payment %s", updated.order_id, updated.id)
-        except Exception as e:
-            logger.warning("Failed to update order %s status after payment: %s", updated.order_id, e)
-    elif mapped == PaymentStatus.PAID and not getattr(updated, "order_id", None):
+    # Update order status based on payment lifecycle events
+    if getattr(updated, "order_id", None):
+        if mapped == PaymentStatus.PAID:
+            try:
+                await update_order_status(db, updated.order_id, OrderStatus.PAID)
+                logger.info("Order %s set to PAID due to successful payment %s", updated.order_id, updated.id)
+            except Exception as e:
+                logger.warning("Failed to update order %s status after payment: %s", updated.order_id, e)
+        elif mapped == PaymentStatus.REFUNDED:
+            try:
+                await update_order_status(db, updated.order_id, OrderStatus.REFUNDED)
+                logger.info("Order %s set to REFUNDED due to refund of payment %s", updated.order_id, updated.id)
+            except Exception as e:
+                logger.warning("Failed to update order %s status after refund: %s", updated.order_id, e)
+    elif mapped == PaymentStatus.PAID:
         logger.warning("Payment %s marked PAID but not linked to any order. Ensure orderId is sent on create.", getattr(updated, "id", None))
     # Invalidate caches so clients don't see stale 'pending' orders
     try:
