@@ -22,6 +22,7 @@ class OctoCreateIn(BaseModel):
 class OctoCreateOut(BaseModel):
     order_id: int
     redirect_url: str
+    payment_uuid: Optional[str] = Field(None, description="Internal payment UUID (now exposed per updated requirement)")
 
 class OctoRefundIn(BaseModel):
     order_id: int = Field(..., ge=1, description="Order ID")
@@ -84,12 +85,26 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
             )
         except Exception as e:
             logger.warning("Failed to persist payment row: %s", e)
-    if res.octo_payment_UUID:
-        try:
-            await update_order_payment_uuid(db, order.id, res.octo_payment_UUID)
-        except Exception as e:
-            logger.warning("Failed to store payment_uuid on order %s: %s", order.id, e)
-    return OctoCreateOut(order_id=order.id, redirect_url=res.octo_pay_url)
+    # Derive/generate payment_uuid (robust fallback)
+    payment_uuid = res.octo_payment_UUID
+    if not payment_uuid:
+        # Try alternate keys in raw payload
+        raw = res.raw or {}
+        data_section = raw.get("data") or raw
+        for k, v in data_section.items():
+            if isinstance(v, str) and "uuid" in k.lower():
+                payment_uuid = v
+                break
+    if not payment_uuid:
+        # Generate a uuid fallback so we can track the intent locally
+        import uuid as _uuid
+        payment_uuid = str(_uuid.uuid4())
+        logger.info("Generated fallback payment_uuid %s for order %s", payment_uuid, order.id)
+    try:
+        await update_order_payment_uuid(db, order.id, payment_uuid)
+    except Exception as e:
+        logger.warning("Failed to store payment_uuid on order %s: %s", order.id, e)
+    return OctoCreateOut(order_id=order.id, redirect_url=res.octo_pay_url, payment_uuid=payment_uuid)
 
 @router.post("/refund", response_model=OctoRefundOut, summary="Refund Octo Payment", responses={
     200: {
