@@ -40,7 +40,6 @@ class Order(Base):
     )
     total_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     notes: Mapped[str] = mapped_column(String(500), nullable=True)
-    payment_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # (payment integration fields trimmed; only status + total retained)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), 
@@ -65,7 +64,6 @@ class Order(Base):
     Index('idx_orders_created', 'created_at'),
     Index('idx_orders_updated', 'updated_at'),
     Index('idx_orders_order_id', 'order_id'),
-    Index('idx_orders_payment_uuid', 'payment_uuid'),
     # Composite indexes for common queries
     Index('idx_orders_user_status', 'user_id', 'status'),
     Index('idx_orders_user_created', 'user_id', 'created_at'),

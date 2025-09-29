@@ -233,17 +233,6 @@ async def delete_order(db: AsyncSession, db_order: Order) -> bool:
     await db.commit()
     return True
 
-async def update_order_payment_uuid(db: AsyncSession, order_id: int, payment_uuid: str) -> Optional[Order]:
-    """Persist external payment UUID without exposing it in API responses."""
-    order = await get_order(db, order_id, load_relationships=False)
-    if not order:
-        return None
-    order.payment_uuid = payment_uuid
-    db.add(order)
-    await db.commit()
-    await db.refresh(order)
-    return order
-
 async def get_user_orders(
     db: AsyncSession,
     user_id: int,

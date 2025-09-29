@@ -15,113 +15,23 @@ from app.core.cache import invalidate_cache_pattern
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-class CreatePaymentIn(BaseModel):
-    order_id: int = Field(..., ge=1, description="ID заказа (internal numeric primary key)")
-    model_config = {
-        "json_schema_extra": {
-            "example": {"order_id": 2},
-        }
-    }
+class OctoCreateIn(BaseModel):
+    order_id: int = Field(..., ge=1, description="Order ID")
+    model_config = {"json_schema_extra": {"example": {"order_id": 2}}}
 
-class CreatePaymentOut(BaseModel):
-    pay_url: str
-    payment_uuid: Optional[str] = None
-    shop_transaction_id: Optional[str] = None
-    order_id: Optional[int] = None
-
-class RefundIn(BaseModel):
-    payment_uuid: str
-    amount: int = Field(..., gt=0, description="Сумма возврата в UZS")
-    
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "payment_uuid": "f4f28a3e-3b60-4a3a-8c2e-0e9f7a1e8b05",
-                "amount": 13000
-            }
-        }
-    }
-
-class RefundOut(BaseModel):
-    success: bool
-    message: Optional[str] = None
-
-# ---------------- Simplified required endpoints (hide payment_uuid) ----------------
-class OctoPayCreateIn(BaseModel):
-    order_id: int = Field(..., gt=0)
-
-class OctoPayCreateOut(BaseModel):
+class OctoCreateOut(BaseModel):
     order_id: int
     redirect_url: str
 
-class OctoPayRefundIn(BaseModel):
-    order_id: int = Field(..., gt=0)
+class OctoRefundIn(BaseModel):
+    order_id: int = Field(..., ge=1, description="Order ID")
+    model_config = {"json_schema_extra": {"example": {"order_id": 2}}}
 
-class OctoPayRefundOut(BaseModel):
+class OctoRefundOut(BaseModel):
     order_id: int
     status: str
 
-@router.post("/create-payment", response_model=OctoPayCreateOut, summary="Create payment (OctoPay mock)")
-async def octopay_create_payment(body: OctoPayCreateIn, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    from app.crud.order import get_order, update_order_payment_uuid
-    order = await get_order(db, body.order_id, load_relationships=False)
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    # Mock external call using httpx (wrapped in try/except); fall back to fabricated data if fails
-    import httpx
-    amount = int(round(order.total_amount))
-    if amount <= 0:
-        raise HTTPException(status_code=400, detail="Order total is zero; cannot create payment")
-    payload = {"order_id": order.id, "amount": amount}
-    payment_uuid = None
-    redirect_url = None
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post("https://api.octopay.local/create", json=payload)
-        if resp.status_code < 400:
-            data = resp.json()
-            payment_uuid = data.get("payment_uuid")
-            redirect_url = data.get("redirect_url")
-    except Exception as e:
-        logger.warning("Mock OctoPay create error (fallback to fabricated): %s", e)
-    if not payment_uuid:
-        # Fabricate mock identifiers
-        import uuid
-        payment_uuid = f"mock-{uuid.uuid4()}"
-    if not redirect_url:
-        redirect_url = f"https://octopay.local/pay/{payment_uuid}"
-    # Store payment_uuid internally (never expose it)
-    try:
-        await update_order_payment_uuid(db, order.id, payment_uuid)
-    except Exception as e:
-        logger.warning("Failed to persist payment_uuid for order %s: %s", order.id, e)
-    return OctoPayCreateOut(order_id=order.id, redirect_url=redirect_url)
-
-@router.post("/refund-payment", response_model=OctoPayRefundOut, summary="Refund payment (OctoPay mock)")
-async def octopay_refund_payment(body: OctoPayRefundIn, db: AsyncSession = Depends(get_db), admin=Depends(get_current_admin)):
-    from app.crud.order import get_order, update_order_status
-    order = await get_order(db, body.order_id, load_relationships=False)
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    if order.status == OrderStatus.REFUNDED:
-        raise HTTPException(status_code=400, detail="Order already refunded")
-    if not getattr(order, 'payment_uuid', None):
-        raise HTTPException(status_code=400, detail="Order has no payment_uuid; cannot refund")
-    # Mock external refund call
-    import httpx
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post("https://api.octopay.local/refund", json={"payment_uuid": order.payment_uuid})
-        if resp.status_code >= 400:
-            raise HTTPException(status_code=400, detail="OctoPay refund error")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning("Mock OctoPay refund error (continuing anyway for dev): %s", e)
-    await update_order_status(db, order.id, OrderStatus.REFUNDED)
-    return OctoPayRefundOut(order_id=order.id, status=OrderStatus.REFUNDED.value)
-
-@router.post("/create", response_model=CreatePaymentOut, summary="Create Octo Payment (by order only)", responses={
+@router.post("/create", response_model=OctoCreateOut, summary="Create Octo Payment", responses={
     200: {
         "description": "Ссылка на оплату создана",
         "content": {
@@ -142,45 +52,46 @@ async def octopay_refund_payment(body: OctoPayRefundIn, db: AsyncSession = Depen
         }
     }
 })
-async def create_octo_payment(
-    body: CreatePaymentIn = Body(..., example={"order_id": 2}),
-    user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    # Load order to derive amount & description
-    from app.crud.order import get_order
-    order = await get_order(db, body.order_id)
+async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Create a payment for an order.
+    Business rules:
+    - Store payment_uuid internally; never return it.
+    - Return only order_id and redirect_url.
+    """
+    from app.crud.order import get_order, update_order_payment_uuid
+    order = await get_order(db, body.order_id, load_relationships=False)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    total_sum = int(round(order.total_amount))
-    if total_sum <= 0:
+    if order.status == OrderStatus.REFUNDED:
+        raise HTTPException(status_code=400, detail="Cannot create payment for refunded order")
+    amount = int(round(order.total_amount))
+    if amount <= 0:
         raise HTTPException(status_code=400, detail="Order total is zero; cannot create payment")
-    description = f"Оплата заказа #{order.order_id}" if getattr(order, 'order_id', None) else f"Оплата заказа {order.id}"
-    res = await createPayment(total_sum, description)
+    # Mock external OCTO call via existing service wrapper; fallback fabricate
+    res = await createPayment(amount, f"Order #{order.order_id}")
     if not res.success or not res.octo_pay_url:
-        logger.warning("OCTO createPayment failed: %s", res.errMessage)
         raise HTTPException(status_code=400, detail=res.errMessage or "OCTO error")
-    # Persist a payment row for tracking
-    try:
-        if res.shop_transaction_id:
+    # Persist to payments table (internal tracking) & attach payment_uuid to order
+    if res.shop_transaction_id:
+        try:
             await create_payment(
                 db,
                 shop_transaction_id=res.shop_transaction_id,
-                amount=float(total_sum),
+                amount=float(amount),
                 currency="UZS",
-                order_id=body.order_id,
+                order_id=order.id,
                 octo_payment_uuid=res.octo_payment_UUID,
             )
-    except Exception as e:
-        logger.warning("Failed to persist payment row: %s", e)
-    return CreatePaymentOut(
-        pay_url=res.octo_pay_url,
-        payment_uuid=res.octo_payment_UUID,
-        shop_transaction_id=res.shop_transaction_id,
-        order_id=body.order_id,
-    )
+        except Exception as e:
+            logger.warning("Failed to persist payment row: %s", e)
+    if res.octo_payment_UUID:
+        try:
+            await update_order_payment_uuid(db, order.id, res.octo_payment_UUID)
+        except Exception as e:
+            logger.warning("Failed to store payment_uuid on order %s: %s", order.id, e)
+    return OctoCreateOut(order_id=order.id, redirect_url=res.octo_pay_url)
 
-@router.post("/refund", response_model=RefundOut, summary="Refund Octo Payment", responses={
+@router.post("/refund", response_model=OctoRefundOut, summary="Refund Octo Payment", responses={
     200: {
         "description": "Возврат инициирован",
         "content": {"application/json": {"example": {"success": True, "message": "Refund initiated"}}}
@@ -190,19 +101,21 @@ async def create_octo_payment(
         "content": {"application/json": {"example": {"detail": "Minimum refund is >= 13000 UZS (1 USD)"}}}
     }
 })
-async def refund_octo_payment(body: RefundIn, admin=Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
-    res = await refundPayment(body.payment_uuid, body.amount)
+async def refund_octo_payment(body: OctoRefundIn, admin=Depends(get_current_admin), db: AsyncSession = Depends(get_db)):
+    from app.crud.order import get_order, update_order_status
+    order = await get_order(db, body.order_id, load_relationships=False)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status == OrderStatus.REFUNDED:
+        raise HTTPException(status_code=400, detail="Order already refunded")
+    if not order.payment_uuid:
+        raise HTTPException(status_code=400, detail="Order has no payment_uuid; cannot refund")
+    # Mock external refund call
+    res = await refundPayment(order.payment_uuid, int(round(order.total_amount)))
     if not res.success:
-        logger.warning("OCTO refund failed: %s", res.errMessage)
-        raise HTTPException(status_code=400, detail=res.errMessage or "OCTO error")
-    payment = await get_payment_by_uuid(db, body.payment_uuid)
-    if payment and getattr(payment, "order_id", None):
-        try:
-            await update_order_status(db, payment.order_id, OrderStatus.REFUNDED)
-            logger.info("Order %s set to REFUNDED after refund of payment %s", payment.order_id, payment.id)
-        except Exception as e:
-            logger.warning("Failed to update order status to REFUNDED: %s", e)
-    return RefundOut(success=True, message="Refund initiated; order marked refunded if linked")
+        raise HTTPException(status_code=400, detail=res.errMessage or "OCTO refund error")
+    await update_order_status(db, order.id, OrderStatus.REFUNDED)
+    return OctoRefundOut(order_id=order.id, status=OrderStatus.REFUNDED.value)
 
 # Optional: minimal notify webhook to satisfy notify_url requirement
 class OctoNotifyIn(BaseModel):
