@@ -119,6 +119,44 @@ async def init_db():
         except Exception as e:
             logger.warning("Order status normalization skipped/failed: %s", e)
 
+        # --- Lightweight migration: add payment_uuid column to orders if missing (idempotent) ---
+        try:
+            res = await conn.exec_driver_sql("PRAGMA table_info(orders);")
+            cols = [r[1] for r in res.fetchall()]  # r[1] is column name
+            if 'payment_uuid' not in cols:
+                logger.info("Adding missing payment_uuid column to orders table (auto-migration)...")
+                await conn.exec_driver_sql("ALTER TABLE orders ADD COLUMN payment_uuid VARCHAR(64);")
+                try:
+                    await conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_orders_payment_uuid ON orders(payment_uuid);")
+                except Exception:
+                    pass
+                # Best-effort backfill from payments table when possible
+                try:
+                    await conn.exec_driver_sql(
+                        """
+                        UPDATE orders
+                        SET payment_uuid = (
+                            SELECT p.octo_payment_uuid
+                            FROM payments p
+                            WHERE p.order_id = orders.id AND p.octo_payment_uuid IS NOT NULL
+                            ORDER BY p.created_at DESC
+                            LIMIT 1
+                        )
+                        WHERE payment_uuid IS NULL;
+                        """
+                    )
+                except Exception as e:
+                    logger.warning("Backfill payment_uuid skipped: %s", e)
+                logger.info("payment_uuid column added & backfill attempted")
+            else:
+                # Ensure index exists (ignore errors)
+                try:
+                    await conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_orders_payment_uuid ON orders(payment_uuid);")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning("Auto-migration for payment_uuid failed/skipped: %s", e)
+
 # Close database connections
 async def close_db():
     """Close database connections"""
