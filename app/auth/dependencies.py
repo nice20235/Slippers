@@ -40,6 +40,19 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
             logger.warning("Invalid JWT token or missing subject")
             raise credentials_exception
         
+        # Check session expiration if present
+        sess_exp_ts = payload.get("sess_exp")
+        if sess_exp_ts:
+            from datetime import datetime
+            sess_exp_dt = datetime.utcfromtimestamp(int(sess_exp_ts))
+            if datetime.utcnow() >= sess_exp_dt:
+                logger.warning("Session expired, forcing re-login")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session expired. Please log in again.",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
+        
         user_id: int = int(payload["sub"])
         user = await get_user(db, user_id)
         

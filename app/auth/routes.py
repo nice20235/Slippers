@@ -177,11 +177,34 @@ async def refresh_token(
     }
 
 @auth_router.post("/logout")
-async def logout():
+async def logout(request: Request, response: Response):
     """
-    Logout endpoint (no cookies to clear). Client should discard tokens stored on the frontend.
+    Logout endpoint - invalidate session and clear any cached user data
     """
-    return {"message": "Logged out successfully"}
+    try:
+        # Try to get current user to invalidate their cache
+        header_auth = request.headers.get("Authorization") or request.headers.get("authorization")
+        if header_auth:
+            parts = header_auth.split()
+            if len(parts) == 2 and parts[0].lower() == "bearer":
+                token = parts[1].strip()
+                from app.auth.jwt import decode_access_token
+                payload = decode_access_token(token)
+                if payload and "sub" in payload:
+                    user_id = payload["sub"]
+                    # Clear any cached user data
+                    from app.core.cache import cache
+                    await cache.clear_pattern(f"user:{user_id}")
+                    await cache.clear_pattern(f"orders:{user_id}")
+                    logger.info(f"Logged out user {user_id} and cleared cache")
+    except Exception as e:
+        logger.warning(f"Error during logout cache cleanup: {e}")
+    
+    # Set response headers to help client clear tokens
+    response.headers["Clear-Site-Data"] = '"cache", "storage"'
+    response.headers["X-Logout"] = "true"
+    
+    return {"message": "Logged out successfully", "timestamp": datetime.utcnow().isoformat()}
 
 
 @auth_router.post("/forgot-password")

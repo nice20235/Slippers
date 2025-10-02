@@ -9,7 +9,7 @@ from functools import wraps
 class SimpleAsyncCache:
     """Simple in-memory async cache with TTL support"""
     
-    def __init__(self, default_ttl: int = 300):  # 5 minutes default
+    def __init__(self, default_ttl: int = 60):  # Reduced from 300 to 60 seconds (1 minute) for auth-sensitive data
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._default_ttl = default_ttl
         self._lock = asyncio.Lock()
@@ -68,9 +68,9 @@ class SimpleAsyncCache:
                 del self._cache[key]
 
 # Global cache instance
-cache = SimpleAsyncCache(default_ttl=300)  # 5 minutes
+cache = SimpleAsyncCache(default_ttl=60)  # 1 minute for security-sensitive caching
 
-def cached(ttl: int = 300, key_prefix: str = ""):
+def cached(ttl: int = 60, key_prefix: str = ""):  # Reduced from 300 to 60 seconds
     """Decorator to cache function results"""
     def decorator(func: Callable) -> Callable:
         @wraps(func)
