@@ -146,16 +146,16 @@ class OctoNotifyIn(BaseModel):
     }
 
 @router.post("/notify", summary="Octo notify webhook")
-async def octo_notify(request: Request, body: OctoNotifyIn, db: AsyncSession = Depends(get_db)):
+async def octo_notify(request: Request, body: Optional[OctoNotifyIn] = None, db: AsyncSession = Depends(get_db)):
     try:
         payload = await request.json()
     except Exception:
         payload = body.model_dump() if body else {}
     logger.info("OCTO notify received: %s", payload)
     # TODO: verify signature if OCTO provides one
-    shop_tx = payload.get("shop_transaction_id") or body.shop_transaction_id
-    payment_uuid = payload.get("payment_uuid") or body.payment_uuid
-    status = (payload.get("status") or body.status or "").lower()
+    shop_tx = payload.get("shop_transaction_id") or (body.shop_transaction_id if body else None)
+    payment_uuid = payload.get("payment_uuid") or (body.payment_uuid if body else None)
+    status = (payload.get("status") or (body.status if body else None) or "").lower()
     # Load payment record by shop_transaction_id first
     payment = None
     if shop_tx:
