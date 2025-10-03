@@ -4,6 +4,7 @@ from app.db.database import get_db
 from app.auth.jwt import create_access_token, create_refresh_token, decode_refresh_token, _calc_session_exp
 from app.crud.user import create_user, authenticate_user, get_user_by_name, get_user_by_phone_number, get_user, update_user_password
 from app.schemas.user import UserCreate, UserLogin, RefreshTokenRequest, UserResponse, ForgotPasswordRequest
+from typing import Optional
 
 import logging
 from datetime import datetime
@@ -125,15 +126,36 @@ async def login_user(
 
 @auth_router.post("/refresh")
 async def refresh_token(
-    refresh_request: RefreshTokenRequest,
+    request: Request,
+    refresh_request: Optional[RefreshTokenRequest] = None,
     db: AsyncSession = Depends(get_db),
     response: Response = None
 ):
     """
-    Refresh access token using refresh token
+    Refresh access token using refresh token from body or headers
     """
+    # Try to get refresh token from multiple sources
+    refresh_token_value = None
+    
+    # 1. From request body (primary)
+    if refresh_request and refresh_request.refresh_token:
+        refresh_token_value = refresh_request.refresh_token
+    else:
+        # 2. From headers (fallback)
+        refresh_token_value = (
+            request.headers.get("Refresh-Token") or 
+            request.headers.get("refresh-token") or
+            request.headers.get("X-Refresh-Token")
+        )
+    
+    if not refresh_token_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refresh token required in request body or headers"
+        )
+    
     # Decode refresh token
-    payload = decode_refresh_token(refresh_request.refresh_token)
+    payload = decode_refresh_token(refresh_token_value)
     if not payload or "sub" not in payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -166,6 +188,72 @@ async def refresh_token(
         response.headers["Token-Type"] = "bearer"
         response.headers["X-Expires-In"] = str(settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     logger.info(f"Token refreshed for user: {user.name} (ID: {user.id})")
+    user_payload = UserResponse.from_orm(user).dict()
+    user_payload.pop("id", None)
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES,
+        "user": user_payload,
+    }
+
+@auth_router.get("/refresh")
+async def refresh_token_get(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    response: Response = None
+):
+    """
+    Refresh access token using refresh token from headers (GET method)
+    """
+    refresh_token_value = (
+        request.headers.get("Refresh-Token") or 
+        request.headers.get("refresh-token") or
+        request.headers.get("X-Refresh-Token") or
+        request.query_params.get("refresh_token")
+    )
+    
+    if not refresh_token_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refresh token required in headers or query parameter"
+        )
+    
+    # Decode refresh token  
+    payload = decode_refresh_token(refresh_token_value)
+    if not payload or "sub" not in payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+    # Get user
+    user_id = int(payload["sub"])
+    user = await get_user(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token"
+        )
+    # Preserve original absolute session expiration if present
+    sess_exp_ts = payload.get("sess_exp")
+    if sess_exp_ts:
+        sess_exp_dt = datetime.utcfromtimestamp(int(sess_exp_ts))
+        if datetime.utcnow() >= sess_exp_dt:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired. Please log in again.")
+    else:
+        sess_exp_dt = _calc_session_exp(datetime.utcnow())
+
+    # Create new tokens but do NOT extend sess_exp
+    access_token = create_access_token(data={"sub": str(user.id)}, session_exp=sess_exp_dt)
+    refresh_token = create_refresh_token(data={"sub": str(user.id)}, session_exp=sess_exp_dt)
+    # Return tokens via response headers
+    if response is not None:
+        response.headers["Authorization"] = f"Bearer {access_token}"
+        response.headers["Refresh-Token"] = refresh_token
+        response.headers["Token-Type"] = "bearer"
+        response.headers["X-Expires-In"] = str(settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    logger.info(f"Token refreshed for user: {user.name} (ID: {user.id}) via GET")
     user_payload = UserResponse.from_orm(user).dict()
     user_payload.pop("id", None)
     return {

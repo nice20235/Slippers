@@ -179,7 +179,11 @@ class TokenResponse(BaseModel):
     user: UserResponse = Field(..., description="User information")
 
 class RefreshTokenRequest(BaseModel):
-    refresh_token: str = Field(..., description="JWT refresh token")
+    refresh_token: Optional[str] = Field(None, description="JWT refresh token (can also be provided in headers)")
+    
+    class Config:
+        # Allow request with empty body when token is in headers
+        extra = "ignore"
 
 class ForgotPasswordRequest(BaseModel):
     name: str = Field(
