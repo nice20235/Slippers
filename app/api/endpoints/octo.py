@@ -147,57 +147,32 @@ class OctoNotifyIn(BaseModel):
 
 @router.post("/notify", summary="Octo notify webhook")
 async def octo_notify(request: Request, db: AsyncSession = Depends(get_db)):
-    """
-    Webhook endpoint that handles both POST and GET requests from payment gateway.
-    Supports JSON body, form data, query parameters, and empty requests.
-    """
+    # Try to get JSON payload first, fallback to form data or empty dict
     payload = {}
+    body_data = None
     
     try:
-        # Method 1: Try to parse JSON body
-        if request.method == "POST":
+        # Try JSON first
+        payload = await request.json()
+    except Exception:
+        try:
+            # Try form data
+            form_data = await request.form()
+            payload = dict(form_data)
+        except Exception:
+            # Try raw body as backup
             try:
-                content_type = request.headers.get("content-type", "").lower()
-                if "application/json" in content_type:
-                    payload = await request.json()
-                elif "application/x-www-form-urlencoded" in content_type:
-                    # Handle form data
-                    form_data = await request.form()
-                    payload = dict(form_data)
-                else:
-                    # Try JSON anyway as fallback
-                    try:
-                        payload = await request.json()
-                    except:
-                        # If JSON fails, try form data
-                        form_data = await request.form()
-                        payload = dict(form_data)
-            except Exception as e:
-                logger.warning(f"Failed to parse request body: {e}")
+                body_bytes = await request.body()
+                if body_bytes:
+                    import json
+                    payload = json.loads(body_bytes.decode('utf-8'))
+            except Exception:
                 payload = {}
-        
-        # Method 2: Merge query parameters (for GET requests or additional data)
-        query_params = dict(request.query_params)
-        if query_params:
-            payload.update(query_params)
-            
-        # Method 3: If still empty, create a minimal payload for logging
-        if not payload:
-            payload = {
-                "method": request.method,
-                "url": str(request.url),
-                "headers": dict(request.headers),
-                "_empty_request": True
-            }
-            
-    except Exception as e:
-        logger.error(f"Error parsing webhook request: {e}")
-        payload = {"_parse_error": str(e), "method": request.method}
     
-    logger.info("OCTO notify received (method=%s): %s", request.method, payload)
+    logger.info("OCTO notify received: %s", payload)
     # TODO: verify signature if OCTO provides one
     shop_tx = payload.get("shop_transaction_id")
-    payment_uuid = payload.get("payment_uuid") or payload.get("octo_payment_UUID")
+    payment_uuid = payload.get("payment_uuid")
     status = (payload.get("status") or "").lower()
     # Load payment record by shop_transaction_id first
     payment = None
