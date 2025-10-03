@@ -146,16 +146,60 @@ class OctoNotifyIn(BaseModel):
     }
 
 @router.post("/notify", summary="Octo notify webhook")
-async def octo_notify(request: Request, body: Optional[OctoNotifyIn] = None, db: AsyncSession = Depends(get_db)):
+@router.get("/notify", summary="Octo notify webhook (GET fallback)")
+async def octo_notify(request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Webhook endpoint that handles both POST and GET requests from payment gateway.
+    Supports JSON body, form data, query parameters, and empty requests.
+    """
+    payload = {}
+    
     try:
-        payload = await request.json()
-    except Exception:
-        payload = body.model_dump() if body else {}
-    logger.info("OCTO notify received: %s", payload)
+        # Method 1: Try to parse JSON body
+        if request.method == "POST":
+            try:
+                content_type = request.headers.get("content-type", "").lower()
+                if "application/json" in content_type:
+                    payload = await request.json()
+                elif "application/x-www-form-urlencoded" in content_type:
+                    # Handle form data
+                    form_data = await request.form()
+                    payload = dict(form_data)
+                else:
+                    # Try JSON anyway as fallback
+                    try:
+                        payload = await request.json()
+                    except:
+                        # If JSON fails, try form data
+                        form_data = await request.form()
+                        payload = dict(form_data)
+            except Exception as e:
+                logger.warning(f"Failed to parse request body: {e}")
+                payload = {}
+        
+        # Method 2: Merge query parameters (for GET requests or additional data)
+        query_params = dict(request.query_params)
+        if query_params:
+            payload.update(query_params)
+            
+        # Method 3: If still empty, create a minimal payload for logging
+        if not payload:
+            payload = {
+                "method": request.method,
+                "url": str(request.url),
+                "headers": dict(request.headers),
+                "_empty_request": True
+            }
+            
+    except Exception as e:
+        logger.error(f"Error parsing webhook request: {e}")
+        payload = {"_parse_error": str(e), "method": request.method}
+    
+    logger.info("OCTO notify received (method=%s): %s", request.method, payload)
     # TODO: verify signature if OCTO provides one
-    shop_tx = payload.get("shop_transaction_id") or (body.shop_transaction_id if body else None)
-    payment_uuid = payload.get("payment_uuid") or (body.payment_uuid if body else None)
-    status = (payload.get("status") or (body.status if body else None) or "").lower()
+    shop_tx = payload.get("shop_transaction_id")
+    payment_uuid = payload.get("payment_uuid") or payload.get("octo_payment_UUID")
+    status = (payload.get("status") or "").lower()
     # Load payment record by shop_transaction_id first
     payment = None
     if shop_tx:
@@ -234,3 +278,70 @@ async def octo_notify(request: Request, body: Optional[OctoNotifyIn] = None, db:
     except Exception:
         pass
     return {"ok": True}
+
+@router.get("/return", summary="Payment return URL endpoint")
+@router.post("/return", summary="Payment return URL endpoint (POST)")
+async def payment_return(request: Request):
+    """
+    Endpoint for users returning from payment gateway.
+    Handles both GET and POST redirects from payment providers.
+    """
+    try:
+        # Get all parameters (query + form data if POST)
+        params = dict(request.query_params)
+        
+        if request.method == "POST":
+            try:
+                form_data = await request.form()
+                params.update(dict(form_data))
+            except Exception:
+                pass
+        
+        logger.info("Payment return received (method=%s): %s", request.method, params)
+        
+        # Extract common payment result parameters
+        status = params.get("status", "").lower()
+        payment_id = params.get("payment_id") or params.get("octo_payment_UUID") or params.get("payment_uuid")
+        order_id = params.get("order_id") or params.get("orderId")
+        
+        # Determine redirect based on status
+        if status in ["paid", "success", "completed"]:
+            redirect_url = "https://www.optomoyoqkiyim.uz/payment/success"
+            if order_id:
+                redirect_url += f"?order_id={order_id}"
+        elif status in ["failed", "error", "cancelled"]:
+            redirect_url = "https://www.optomoyoqkiyim.uz/payment/failed"
+        else:
+            # Default/unknown status
+            redirect_url = "https://www.optomoyoqkiyim.uz/payment/pending"
+        
+        # Return HTML redirect for user's browser
+        from fastapi.responses import HTMLResponse
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Payment Processing</title>
+            <meta http-equiv="refresh" content="3;url={redirect_url}">
+        </head>
+        <body>
+            <div style="text-align: center; padding: 50px; font-family: Arial;">
+                <h2>Payment Processing Complete</h2>
+                <p>Redirecting you back to the store...</p>
+                <p>If you are not redirected automatically, <a href="{redirect_url}">click here</a>.</p>
+            </div>
+            <script>
+                setTimeout(function() {{
+                    window.location.href = "{redirect_url}";
+                }}, 2000);
+            </script>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
+        
+    except Exception as e:
+        logger.error(f"Error in payment return: {e}")
+        # Fallback redirect to home
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="https://www.optomoyoqkiyim.uz/")
