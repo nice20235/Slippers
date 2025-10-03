@@ -146,7 +146,6 @@ class OctoNotifyIn(BaseModel):
     }
 
 @router.post("/notify", summary="Octo notify webhook")
-@router.get("/notify", summary="Octo notify webhook (GET fallback)")
 async def octo_notify(request: Request, db: AsyncSession = Depends(get_db)):
     """
     Webhook endpoint that handles both POST and GET requests from payment gateway.
@@ -280,24 +279,16 @@ async def octo_notify(request: Request, db: AsyncSession = Depends(get_db)):
     return {"ok": True}
 
 @router.get("/return", summary="Payment return URL endpoint")
-@router.post("/return", summary="Payment return URL endpoint (POST)")
 async def payment_return(request: Request):
     """
     Endpoint for users returning from payment gateway.
     Handles both GET and POST redirects from payment providers.
     """
     try:
-        # Get all parameters (query + form data if POST)
+        # Get query parameters (GET requests)
         params = dict(request.query_params)
         
-        if request.method == "POST":
-            try:
-                form_data = await request.form()
-                params.update(dict(form_data))
-            except Exception:
-                pass
-        
-        logger.info("Payment return received (method=%s): %s", request.method, params)
+        logger.info("Payment return received: %s", params)
         
         # Extract common payment result parameters
         status = params.get("status", "").lower()
