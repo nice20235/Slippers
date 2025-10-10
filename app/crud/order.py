@@ -8,6 +8,7 @@ from app.schemas.order import OrderCreate, OrderUpdate, OrderItemCreate
 from typing import Optional, List, Tuple
 import logging
 from app.models.payment import Payment, PaymentStatus
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,69 @@ async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: st
                 .where(Order.id == existing.id)
             )
             return result.scalar_one()
+
+    # Fallback: merge into latest pending order without payment within recent window
+    # This covers clients that send multiple POST /orders (one per item) without idempotency header.
+    try:
+        cutoff = datetime.utcnow() - timedelta(minutes=5)
+        merge_q = (
+            select(Order)
+            .where(
+                Order.user_id == order.user_id,
+                Order.status == OrderStatus.PENDING,
+                Order.payment_uuid.is_(None),
+                Order.created_at >= cutoff,
+            )
+            .order_by(Order.created_at.desc())
+            .options(selectinload(Order.items))
+        )
+        merge_target = (await db.execute(merge_q)).scalars().first()
+    except Exception:
+        merge_target = None
+
+    if merge_target is not None:
+        # Build index of existing items by slipper_id
+        existing_by_slipper = {it.slipper_id: it for it in (merge_target.items or [])}
+        new_items_total = 0.0
+        # For each incoming item, merge into existing or create new
+        for item_data in order.items:
+            slipper = (await db.execute(select(Slipper).where(Slipper.id == item_data.slipper_id))).scalar_one_or_none()
+            if not slipper:
+                raise ValueError(f"Slipper with ID {item_data.slipper_id} not found")
+            unit_price = slipper.price
+            if item_data.slipper_id in existing_by_slipper:
+                existing_item = existing_by_slipper[item_data.slipper_id]
+                existing_item.quantity += item_data.quantity
+                existing_item.unit_price = unit_price  # keep current price snapshot
+                existing_item.total_price = unit_price * existing_item.quantity
+                db.add(existing_item)
+            else:
+                oi = OrderItem(
+                    order_id=merge_target.id,
+                    slipper_id=item_data.slipper_id,
+                    quantity=item_data.quantity,
+                    unit_price=unit_price,
+                    total_price=unit_price * item_data.quantity,
+                    notes=item_data.notes,
+                )
+                db.add(oi)
+                new_items_total += oi.total_price
+        # Recalculate total_amount (sum of all items)
+        current_total = sum((it.total_price or 0.0) for it in (merge_target.items or []))
+        merge_target.total_amount = current_total + new_items_total
+        db.add(merge_target)
+        await db.commit()
+        await db.refresh(merge_target)
+        # Load relationships for response
+        result = await db.execute(
+            select(Order)
+            .options(
+                selectinload(Order.user),
+                selectinload(Order.items).selectinload(OrderItem.slipper)
+            )
+            .where(Order.id == merge_target.id)
+        )
+        return result.scalar_one()
     # Calculate total amount
     total_amount = 0.0
     order_items = []
