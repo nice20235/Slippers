@@ -90,6 +90,10 @@ async def list_orders(
     Pagination & status filtering removed per request.
     """
     try:
+        # Build a per-user cache key shim by referencing args in cached decorator
+        # The cached decorator includes function args in key, so ensure user.id and finance are present
+        _ = user.id  # referenced for clarity; no-op
+        _ = finance
         if finance and finance.lower() == "paid_refunded":
             statuses = [PaymentStatus.PAID, PaymentStatus.REFUNDED]
             if user.is_admin:

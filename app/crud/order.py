@@ -62,7 +62,8 @@ async def get_orders(
     total = count_result.scalar() or 0
 
     data_result = await db.execute(query.offset(skip).limit(limit))
-    orders = data_result.scalars().all()
+    # Ensure uniqueness when eager loaders are involved
+    orders = data_result.unique().scalars().all()
     
     return orders, total
 
@@ -109,6 +110,8 @@ async def get_orders_by_payment_statuses(
         base = base.where(and_(*conditions))
 
     base = base.order_by(Order.created_at.desc())
+    # Guard against duplicate rows per order due to joins/ties in latest payments
+    base = base.distinct(Order.id)
 
     # Count
     count_query = select(func.count()).select_from(base.subquery())
@@ -120,7 +123,7 @@ async def get_orders_by_payment_statuses(
             joinedload(Order.user),
             selectinload(Order.items).selectinload(OrderItem.slipper),
         )
-    rows = (await db.execute(base)).all()
+    rows = (await db.execute(base)).unique().all()
     return rows, total
 
 async def create_order(db: AsyncSession, order: OrderCreate) -> Order:

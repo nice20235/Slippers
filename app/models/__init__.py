@@ -1,1 +1,1 @@
-from . import user, order, slipper, payment
+from . import user, order, slipper

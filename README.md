@@ -10,6 +10,13 @@ FastAPI-based slippers ordering & payment system with user authentication, catal
 - **Categories**: CRUD & caching
 - **Orders**: Creation with multiple items, status transitions, finance filter (only paid/refunded)
 - **Payments (OCTO)**: One‑stage auto-capture prepare_payment, webhook (notify) handling, refunds
+## Maintenance/cleanup notes
+
+- Deprecated/unused modules removed: `app/api/endpoints/food.py`, `app/api/endpoints/system.py`, `app/crud/food.py`, `app/schemas/simple_order.py`.
+- Slipper replaces legacy "food" naming everywhere; no public routes were removed.
+- Health diagnostics kept at `/health`; extended diagnostics endpoint was removed.
+- Requirements pruned slightly; if you need DNS or Alembic templates on deploy, keep `dnspython`, `Mako`, and `PyYAML`.
+
 - **Caching Layer**: In‑memory TTL cache with pattern invalidation
 - **Security & Performance**: Rate limiting, security headers, gzip, performance timing headers
 - **Async Stack**: FastAPI + SQLAlchemy 2.0 async + SQLite (dev) / PostgreSQL (recommended)
