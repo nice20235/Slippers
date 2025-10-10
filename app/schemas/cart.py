@@ -29,3 +29,10 @@ class CartOut(BaseModel):
     class Config:
         from_attributes = True
 
+
+class CartTotalOut(BaseModel):
+    total_items: int = Field(..., description="Number of distinct items in cart")
+    total_quantity: int = Field(..., description="Sum of quantities across items")
+    total_amount: float = Field(..., description="Sum of price*quantity for all items")
+
+

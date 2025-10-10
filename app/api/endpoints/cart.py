@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.auth.dependencies import get_current_user
-from app.schemas.cart import CartItemCreate, CartItemUpdate, CartOut, CartItemOut
-from app.crud.cart import get_or_create_cart, add_item, update_item, remove_item, clear_cart, get_cart
+from app.schemas.cart import CartItemCreate, CartItemUpdate, CartOut, CartItemOut, CartTotalOut
+from app.crud.cart import get_or_create_cart, add_item, update_item, remove_item, clear_cart, get_cart, get_cart_totals
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,12 @@ def _serialize(cart) -> CartOut:
 async def get_my_cart(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     cart = await get_or_create_cart(db, user.id)
     return _serialize(cart)
+
+@router.get("/total", response_model=CartTotalOut)
+async def get_my_cart_total(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Return only the totals for the current user's cart."""
+    total_items, total_quantity, total_amount = await get_cart_totals(db, user.id)
+    return CartTotalOut(total_items=total_items, total_quantity=total_quantity, total_amount=total_amount)
 
 @router.post("/items", response_model=CartOut)
 async def add_cart_item(payload: CartItemCreate, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):

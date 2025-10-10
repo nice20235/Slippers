@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from app.models.cart import Cart, CartItem
 from app.models.slipper import Slipper
@@ -87,4 +87,35 @@ async def clear_cart(db: AsyncSession, user_id: int) -> Cart:
         await db.delete(ci)
     await db.commit()
     return await _reload_cart(db, cart.id)
+
+
+async def get_cart_totals(db: AsyncSession, user_id: int) -> tuple[int, int, float]:
+    """Efficiently compute totals for a user's cart via SQL aggregation.
+    Returns: (total_items, total_quantity, total_amount)
+    total_items = number of distinct cart lines
+    total_quantity = sum of quantities across lines
+    total_amount = sum(slipper.price * quantity) across lines
+    """
+    # Subquery: cart for user
+    cart_q = await db.execute(select(Cart.id).where(Cart.user_id == user_id))
+    cart_id = cart_q.scalar_one_or_none()
+    if cart_id is None:
+        return 0, 0, 0.0
+
+    q = (
+        select(
+            func.count(CartItem.id),
+            func.coalesce(func.sum(CartItem.quantity), 0),
+            func.coalesce(func.sum((Slipper.price * CartItem.quantity)), 0.0),
+        )
+        .join(Slipper, Slipper.id == CartItem.slipper_id)
+        .where(CartItem.cart_id == cart_id)
+    )
+    res = await db.execute(q)
+    total_items, total_quantity, total_amount = res.first() or (0, 0, 0.0)
+    # Ensure Python types
+    total_items = int(total_items or 0)
+    total_quantity = int(total_quantity or 0)
+    total_amount = float(total_amount or 0.0)
+    return total_items, total_quantity, total_amount
 

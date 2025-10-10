@@ -248,6 +248,12 @@ async def forgot_password(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User with this name not found"
         )
+    # Disallow admin password resets via this public endpoint
+    if getattr(user, "is_admin", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admins cannot reset password via this endpoint"
+        )
     
     # Update password
     updated_user = await update_user_password(db, forgot_data.name, forgot_data.new_password)
@@ -258,13 +264,5 @@ async def forgot_password(
         )
     
     logger.info(f"Password reset for user: {updated_user.name}")
-    return {
-        "message": "Password updated successfully",
-        "user": {
-            "name": updated_user.name,
-            "surname": updated_user.surname,
-            "phone_number": updated_user.phone_number,
-            "is_admin": updated_user.is_admin
-        }
-    }
+    return {"message": "Password updated successfully"}
 
