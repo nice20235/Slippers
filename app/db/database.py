@@ -157,6 +157,25 @@ async def init_db():
         except Exception as e:
             logger.warning("Auto-migration for payment_uuid failed/skipped: %s", e)
 
+        # --- Lightweight migration: add idempotency_key column & unique index if missing (idempotent) ---
+        try:
+            res = await conn.exec_driver_sql("PRAGMA table_info(orders);")
+            cols = [r[1] for r in res.fetchall()]
+            if 'idempotency_key' not in cols:
+                logger.info("Adding missing idempotency_key column to orders table (auto-migration)...")
+                await conn.exec_driver_sql("ALTER TABLE orders ADD COLUMN idempotency_key VARCHAR(64);")
+                try:
+                    await conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_idempotency_key ON orders(idempotency_key);")
+                except Exception:
+                    pass
+            else:
+                try:
+                    await conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_idempotency_key ON orders(idempotency_key);")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning("Auto-migration for idempotency_key failed/skipped: %s", e)
+
 # Close database connections
 async def close_db():
     """Close database connections"""

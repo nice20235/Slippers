@@ -126,8 +126,23 @@ async def get_orders_by_payment_statuses(
     rows = (await db.execute(base)).unique().all()
     return rows, total
 
-async def create_order(db: AsyncSession, order: OrderCreate) -> Order:
+async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: str | None = None) -> Order:
     """Create new order with items"""
+    # If idempotency_key is provided, return existing order to avoid duplicates
+    if idempotency_key:
+        existing_q = select(Order).where(Order.idempotency_key == idempotency_key)
+        existing = (await db.execute(existing_q)).scalar_one_or_none()
+        if existing:
+            # Load relationships and return
+            result = await db.execute(
+                select(Order)
+                .options(
+                    selectinload(Order.user),
+                    selectinload(Order.items).selectinload(OrderItem.slipper)
+                )
+                .where(Order.id == existing.id)
+            )
+            return result.scalar_one()
     # Calculate total amount
     total_amount = 0.0
     order_items = []
@@ -161,7 +176,8 @@ async def create_order(db: AsyncSession, order: OrderCreate) -> Order:
         user_id=order.user_id,
         total_amount=total_amount,
         notes=order.notes,
-        status=OrderStatus.PENDING
+        status=OrderStatus.PENDING,
+        idempotency_key=idempotency_key
     )
     db.add(db_order)
     await db.flush()  # obtain primary key

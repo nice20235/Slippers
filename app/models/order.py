@@ -40,6 +40,8 @@ class Order(Base):
     )
     total_amount: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     notes: Mapped[str] = mapped_column(String(500), nullable=True)
+    # Idempotency key to dedupe order creation retries (per user or global)
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # Internal payment UUID (links to external payment gateway transaction); may be null until payment created
     payment_uuid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     # (payment integration fields trimmed; only status + total retained)
@@ -66,6 +68,8 @@ class Order(Base):
     Index('idx_orders_created', 'created_at'),
     Index('idx_orders_updated', 'updated_at'),
     Index('idx_orders_order_id', 'order_id'),
+    # Uniqueness scoped to idempotency key if provided
+    Index('uq_orders_idempotency_key', 'idempotency_key', unique=True),
     Index('idx_orders_payment_uuid', 'payment_uuid'),
     # Composite indexes for common queries
     Index('idx_orders_user_status', 'user_id', 'status'),

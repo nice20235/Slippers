@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.schemas.order import (
@@ -28,7 +28,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/")
-async def create_order_endpoint(order: OrderCreatePublic, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def create_order_endpoint(
+    order: OrderCreatePublic,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key")
+):
     """
     Create a new order. Available to all authenticated users.
     """
@@ -48,7 +53,7 @@ async def create_order_endpoint(order: OrderCreatePublic, db: AsyncSession = Dep
         ],
         notes=order.notes,
     )
-    new_order = await create_order(db, internal_order)
+    new_order = await create_order(db, internal_order, idempotency_key=x_idempotency_key)
     
     # Clear cache after creating order
     from app.core.cache import invalidate_cache_pattern
