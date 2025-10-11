@@ -39,19 +39,41 @@ async def create_order_endpoint(
     Create a new order. Available to all authenticated users.
     """
     logger.info(f"Creating order for user: {user.name} (Admin: {user.is_admin})")
+    # Build order from the current cart to ensure exact match with cart UI
+    try:
+        from app.crud.cart import get_cart
+        cart = await get_cart(db, user.id)
+    except Exception as _e:
+        cart = None
+        logger.warning("Failed to load cart for order creation: %s", _e)
+
+    if cart and cart.items:
+        items_source = [
+            OrderItemCreate(
+                slipper_id=ci.slipper_id,
+                quantity=ci.quantity,
+                unit_price=1.0,  # ignored; CRUD fetches real price
+                notes=None,
+            )
+            for ci in cart.items
+        ]
+    else:
+        # Fallback to request payload if cart is empty/unavailable
+        items_source = [
+            OrderItemCreate(
+                slipper_id=it.slipper_id,
+                quantity=it.quantity,
+                unit_price=1.0,
+                notes=it.notes,
+            )
+            for it in order.items
+        ]
+
     # Set the user_id from the authenticated user
     internal_order = OrderCreate(
         order_id=None,
         user_id=user.id,
-        items=[
-            OrderItemCreate(
-                slipper_id=it.slipper_id,
-                quantity=it.quantity,
-                unit_price=1.0,  # dummy value; real price fetched in CRUD
-                notes=it.notes,
-            )
-            for it in order.items
-        ],
+        items=items_source,
         notes=order.notes,
     )
     # Opt-in merge only when explicitly requested; default is to create a fresh order
