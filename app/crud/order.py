@@ -305,6 +305,19 @@ async def create_order(
     await db.commit()
     await db.refresh(db_order)
 
+    # Recompute total_amount from DB to ensure perfect accuracy
+    recompute_result = await db.execute(
+        select(func.coalesce(func.sum(OrderItem.total_price), 0.0)).where(
+            OrderItem.order_id == db_order.id
+        )
+    )
+    exact_total = float(recompute_result.scalar() or 0.0)
+    if abs((db_order.total_amount or 0.0) - exact_total) > 1e-6:
+        db_order.total_amount = exact_total
+        db.add(db_order)
+        await db.commit()
+        await db.refresh(db_order)
+
     # Load relationships for response
     result = await db.execute(
         select(Order)
