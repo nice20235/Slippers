@@ -128,7 +128,13 @@ async def get_orders_by_payment_statuses(
     rows = (await db.execute(base)).unique().all()
     return rows, total
 
-async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: str | None = None) -> Order:
+async def create_order(
+    db: AsyncSession,
+    order: OrderCreate,
+    idempotency_key: str | None = None,
+    *,
+    merge_fallback: bool = False,
+) -> Order:
     """Create new order with items"""
     # If idempotency_key is provided, return existing order to avoid duplicates
     if idempotency_key:
@@ -146,24 +152,25 @@ async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: st
             )
             return result.scalar_one()
 
-    # Fallback: merge into latest pending order without payment within recent window
-    # This covers clients that send multiple POST /orders (one per item) without idempotency header.
-    try:
-        cutoff = datetime.utcnow() - timedelta(minutes=5)
-        merge_q = (
-            select(Order)
-            .where(
-                Order.user_id == order.user_id,
-                Order.status == OrderStatus.PENDING,
-                Order.payment_uuid.is_(None),
-                Order.created_at >= cutoff,
+    # Optional: merge into latest pending order within a recent window only if explicitly enabled.
+    merge_target = None
+    if merge_fallback:
+        try:
+            cutoff = datetime.utcnow() - timedelta(minutes=5)
+            merge_q = (
+                select(Order)
+                .where(
+                    Order.user_id == order.user_id,
+                    Order.status == OrderStatus.PENDING,
+                    Order.payment_uuid.is_(None),
+                    Order.created_at >= cutoff,
+                )
+                .order_by(Order.created_at.desc())
+                .options(selectinload(Order.items))
             )
-            .order_by(Order.created_at.desc())
-            .options(selectinload(Order.items))
-        )
-        merge_target = (await db.execute(merge_q)).scalars().first()
-    except Exception:
-        merge_target = None
+            merge_target = (await db.execute(merge_q)).scalars().first()
+        except Exception:
+            merge_target = None
 
     if merge_target is not None:
         # Build index of existing items by slipper_id

@@ -32,7 +32,8 @@ async def create_order_endpoint(
     order: OrderCreatePublic,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
-    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key")
+    x_idempotency_key: str | None = Header(default=None, alias="X-Idempotency-Key"),
+    x_merge_with_latest: str | None = Header(default=None, alias="X-Merge-With-Latest"),
 ):
     """
     Create a new order. Available to all authenticated users.
@@ -53,7 +54,14 @@ async def create_order_endpoint(
         ],
         notes=order.notes,
     )
-    new_order = await create_order(db, internal_order, idempotency_key=x_idempotency_key)
+    # Opt-in merge only when explicitly requested; default is to create a fresh order
+    merge_flag = (x_merge_with_latest or "").lower() in ("1", "true", "yes")
+    new_order = await create_order(
+        db,
+        internal_order,
+        idempotency_key=x_idempotency_key,
+        merge_fallback=merge_flag,
+    )
     
     # Clear cache after creating order
     from app.core.cache import invalidate_cache_pattern
