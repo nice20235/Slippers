@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.schemas.order import (
@@ -17,6 +18,7 @@ from app.crud.order import (
     get_orders_by_payment_statuses,
 )
 from app.models.payment import PaymentStatus
+from app.models.order import OrderItem
 from app.core.timezone import to_tashkent, format_tashkent_compact
 from app.auth.dependencies import get_current_user, get_current_admin
 from app.core.cache import cached
@@ -103,6 +105,12 @@ async def create_order_endpoint(
     await invalidate_cache_pattern("orders:")
     
     created_compact = format_tashkent_compact(new_order.created_at)
+    # IMPORTANT: Avoid accessing new_order.items directly (may trigger async lazy-load)
+    # Fetch items explicitly to prevent MissingGreenlet
+    items_result = await db.execute(
+        select(OrderItem).where(OrderItem.order_id == new_order.id)
+    )
+    items = items_result.scalars().all()
     return {
         "order_id": new_order.order_id,
         "status": new_order.status.value if hasattr(new_order.status, 'value') else str(new_order.status),
@@ -118,7 +126,7 @@ async def create_order_endpoint(
                 "total_price": oi.total_price,
                 "notes": oi.notes,
             }
-            for oi in new_order.items
+            for oi in items
         ],
     }
 
