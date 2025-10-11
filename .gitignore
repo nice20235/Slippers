@@ -132,6 +132,12 @@ ENV/
 env.bak/
 venv.bak/
 
+
+echo "*.db-shm" >> .gitignore
+echo "*.db-wal" >> .gitignore
+echo "*.db-journal" >> .gitignore
+
+
 # Spyder project settings
 .spyderproject
 .spyproject
