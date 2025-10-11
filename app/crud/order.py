@@ -238,17 +238,22 @@ async def create_order(
         slipper = slipper_result.scalar_one_or_none()
         if not slipper:
             raise ValueError(f"Slipper with ID {item_data.slipper_id} not found")
+        # Clamp unrealistic quantities to prevent client mistakes (e.g., using inventory qty)
+        from app.core.config import settings
+        qty = int(item_data.quantity)
+        if qty > settings.ORDER_MAX_QTY_PER_ITEM:
+            qty = settings.ORDER_MAX_QTY_PER_ITEM
         
         # Use current slipper price
         unit_price = slipper.price
-        total_price = unit_price * item_data.quantity
+        total_price = unit_price * qty
         total_amount += total_price
         
         # Create order item (use slipper_id)
         # Consolidate by slipper_id within this creation batch
         existing = next((oi for oi in order_items if oi.slipper_id == item_data.slipper_id), None)
         if existing:
-            existing.quantity += item_data.quantity
+            existing.quantity += qty
             existing.unit_price = unit_price
             existing.total_price = existing.unit_price * existing.quantity
             if item_data.notes and not existing.notes:
@@ -256,7 +261,7 @@ async def create_order(
         else:
             order_item = OrderItem(
                 slipper_id=item_data.slipper_id,
-                quantity=item_data.quantity,
+                quantity=qty,
                 unit_price=unit_price,
                 total_price=total_price,
                 notes=item_data.notes
