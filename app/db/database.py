@@ -198,6 +198,86 @@ async def init_db():
         except Exception as e:
             logger.warning("Order order_id cleanup skipped/failed: %s", e)
 
+        # --- Data repair: consolidate duplicate order_items per (order_id, slipper_id) and recompute order totals ---
+        # Historical bugs could have created multiple rows for the same slipper in one order,
+        # inflating totals. We normalize by collapsing duplicates into a single row per pair.
+        try:
+            # Temp tables: sums per (order_id, slipper_id) and the keeper row id (min id)
+            await conn.exec_driver_sql("DROP TABLE IF EXISTS oi_sums;")
+            await conn.exec_driver_sql("DROP TABLE IF EXISTS oi_keepers;")
+            await conn.exec_driver_sql(
+                """
+                CREATE TEMP TABLE oi_sums AS
+                SELECT order_id, slipper_id, SUM(quantity) AS sum_qty, MAX(unit_price) AS max_unit_price
+                FROM order_items
+                GROUP BY order_id, slipper_id;
+                """
+            )
+            await conn.exec_driver_sql(
+                """
+                CREATE TEMP TABLE oi_keepers AS
+                SELECT MIN(id) AS keep_id, order_id, slipper_id
+                FROM order_items
+                GROUP BY order_id, slipper_id;
+                """
+            )
+
+            # Update keeper rows with consolidated quantities and recomputed totals
+            await conn.exec_driver_sql(
+                """
+                UPDATE order_items
+                SET
+                  quantity = (
+                    SELECT s.sum_qty FROM oi_sums s
+                    WHERE s.order_id = order_items.order_id AND s.slipper_id = order_items.slipper_id
+                  ),
+                  unit_price = (
+                    SELECT s.max_unit_price FROM oi_sums s
+                    WHERE s.order_id = order_items.order_id AND s.slipper_id = order_items.slipper_id
+                  ),
+                  total_price = (
+                    (SELECT s.sum_qty FROM oi_sums s
+                     WHERE s.order_id = order_items.order_id AND s.slipper_id = order_items.slipper_id)
+                    *
+                    (SELECT s.max_unit_price FROM oi_sums s
+                     WHERE s.order_id = order_items.order_id AND s.slipper_id = order_items.slipper_id)
+                  )
+                WHERE id IN (SELECT keep_id FROM oi_keepers);
+                """
+            )
+
+            # Delete all non-keeper duplicates
+            await conn.exec_driver_sql(
+                """
+                DELETE FROM order_items
+                WHERE id NOT IN (SELECT keep_id FROM oi_keepers);
+                """
+            )
+
+            # Recompute totals for all orders to reflect consolidated items
+            await conn.exec_driver_sql(
+                """
+                UPDATE orders
+                SET total_amount = (
+                    SELECT COALESCE(SUM(oi.total_price), 0)
+                    FROM order_items oi
+                    WHERE oi.order_id = orders.id
+                );
+                """
+            )
+
+            # Retry creating the unique index now that duplicates are gone
+            try:
+                await conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_items_order_slipper ON order_items(order_id, slipper_id);"
+                )
+            except Exception:
+                pass
+
+            logger.info("✅ Consolidated duplicate order_items and recomputed order totals")
+        except Exception as e:
+            logger.warning("Duplicate order_items consolidation skipped/failed: %s", e)
+
 # Close database connections
 async def close_db():
     """Close database connections"""
