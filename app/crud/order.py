@@ -9,6 +9,7 @@ from typing import Optional, List, Tuple
 import logging
 from app.models.payment import Payment, PaymentStatus
 from datetime import datetime, timedelta
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -251,10 +252,14 @@ async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: st
             )
             order_items.append(order_item)
     
-    # Create order with temporary placeholder order_id if none provided
+    # Create order with temporary unique placeholder order_id if none provided
     provided_order_id = order.order_id
+    temp_placeholder = None
+    if not provided_order_id:
+        # Use a unique temp value to satisfy unique constraint at INSERT time
+        temp_placeholder = f"tmp-{uuid.uuid4().hex}"
     db_order = Order(
-        order_id=provided_order_id if provided_order_id else "0",
+        order_id=provided_order_id if provided_order_id else temp_placeholder,
         user_id=order.user_id,
         total_amount=total_amount,
         notes=order.notes,

@@ -184,6 +184,20 @@ async def init_db():
         except Exception as e:
             logger.warning("Creating unique index for order_items failed/skipped: %s", e)
 
+        # --- Cleanup migration: fix any bad placeholder order_id values ---
+        # Earlier versions temporarily set order_id to '0' before updating, which could violate the unique constraint
+        # under concurrency. Normalize such rows to the primary key string, and also fix empty/NULL.
+        try:
+            await conn.exec_driver_sql(
+                """
+                UPDATE orders
+                SET order_id = CAST(id AS TEXT)
+                WHERE order_id IS NULL OR order_id = '' OR order_id = '0';
+                """
+            )
+        except Exception as e:
+            logger.warning("Order order_id cleanup skipped/failed: %s", e)
+
 # Close database connections
 async def close_db():
     """Close database connections"""
