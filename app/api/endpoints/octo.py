@@ -16,8 +16,17 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 class OctoCreateIn(BaseModel):
-    order_id: int = Field(..., ge=1, description="Order ID")
-    model_config = {"json_schema_extra": {"example": {"order_id": 2}}}
+    # Accept multiple aliases from clients
+    order_id: Optional[int] = Field(None, ge=1, description="Order ID")
+    orderId: Optional[int] = Field(None, ge=1, description="Order ID alias")
+    # Optional amount passthrough (backend still uses order.total_amount by default)
+    amount: Optional[int] = Field(None, ge=1)
+    total_sum: Optional[int] = Field(None, ge=1)
+    model_config = {
+        "json_schema_extra": {
+            "example": {"order_id": 2}
+        }
+    }
 
 class OctoCreateOut(BaseModel):
     order_id: int
@@ -58,7 +67,11 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
     Now returns payment_uuid per updated requirement so client can track it.
     """
     from app.crud.order import get_order, update_order_payment_uuid
-    order = await get_order(db, body.order_id, load_relationships=False)
+    # Normalize order_id from possible aliases
+    oid = body.order_id or body.orderId
+    if not oid:
+        raise HTTPException(status_code=422, detail="order_id is required")
+    order = await get_order(db, oid, load_relationships=False)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     if order.status == OrderStatus.REFUNDED:
@@ -69,7 +82,9 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
         # Try find existing payment record to reconstruct redirect (cannot fetch if not stored; return 409 style?)
         # For simplicity, continue to allow new creation if user explicitly wants another attempt and old payment maybe failed.
         logger.info("Order %s already has payment_uuid %s", order.id, existing_payment_uuid)
-    amount = int(round(order.total_amount))
+    # Allow optional override if provided (defers to order.total_amount otherwise)
+    override_amount = body.amount or body.total_sum
+    amount = int(round(order.total_amount)) if not override_amount else int(override_amount)
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Order total is zero; cannot create payment")
     # Mock external OCTO call via existing service wrapper; fallback fabricate

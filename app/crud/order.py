@@ -271,7 +271,12 @@ async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: st
 
     # Attach items
     # Upsert items honoring unique (order_id, slipper_id)
-    existing_items_db = {it.slipper_id: it for it in (db_order.items or [])}
+    # Avoid lazy-loading relationship in async context (MissingGreenlet). Fetch explicitly.
+    existing_items_result = await db.execute(
+        select(OrderItem).where(OrderItem.order_id == db_order.id)
+    )
+    existing_items = existing_items_result.scalars().all()
+    existing_items_db = {it.slipper_id: it for it in existing_items}
     for item in order_items:
         item.order_id = db_order.id
         if item.slipper_id in existing_items_db:
