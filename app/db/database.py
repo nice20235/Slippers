@@ -28,6 +28,18 @@ if "sqlite" in DATABASE_URL:
             "isolation_level": None,
         }
     )
+    # Ensure important PRAGMAs are set for every connection
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, connection_record):  # noqa: D401
+        """Set SQLite PRAGMAs for FK enforcement and better journaling."""
+        try:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON;")
+            cursor.execute("PRAGMA journal_mode=WAL;")
+            cursor.close()
+        except Exception:
+            # Best-effort; continue even if PRAGMAs can't be set
+            pass
 else:
     # PostgreSQL/MySQL optimizations
     engine = create_async_engine(

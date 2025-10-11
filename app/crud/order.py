@@ -138,7 +138,11 @@ async def create_order(
     """Create new order with items"""
     # If idempotency_key is provided, return existing order to avoid duplicates
     if idempotency_key:
-        existing_q = select(Order).where(Order.idempotency_key == idempotency_key)
+        # Scope idempotency to the same user to prevent cross-user leakage
+        existing_q = select(Order).where(
+            Order.idempotency_key == idempotency_key,
+            Order.user_id == order.user_id,
+        )
         existing = (await db.execute(existing_q)).scalar_one_or_none()
         if existing:
             # Load relationships and return
