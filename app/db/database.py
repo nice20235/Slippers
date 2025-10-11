@@ -176,6 +176,14 @@ async def init_db():
         except Exception as e:
             logger.warning("Auto-migration for idempotency_key failed/skipped: %s", e)
 
+        # --- Lightweight migration: enforce unique (order_id, slipper_id) on order_items to avoid duplicates ---
+        try:
+            await conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_items_order_slipper ON order_items(order_id, slipper_id);"
+            )
+        except Exception as e:
+            logger.warning("Creating unique index for order_items failed/skipped: %s", e)
+
 # Close database connections
 async def close_db():
     """Close database connections"""

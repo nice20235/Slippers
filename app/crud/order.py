@@ -197,6 +197,15 @@ async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: st
         db.add(merge_target)
         await db.commit()
         await db.refresh(merge_target)
+        # Second pass: re-load items to ensure totals reflect DB state, then recompute precise total
+        reloaded = await db.execute(
+            select(Order).options(selectinload(Order.items)).where(Order.id == merge_target.id)
+        )
+        merge_obj = reloaded.scalar_one()
+        merge_obj.total_amount = sum((it.total_price or 0.0) for it in (merge_obj.items or []))
+        db.add(merge_obj)
+        await db.commit()
+        await db.refresh(merge_obj)
         # Load relationships for response
         result = await db.execute(
             select(Order)
@@ -206,7 +215,7 @@ async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: st
             )
             .where(Order.id == merge_target.id)
         )
-        return result.scalar_one()
+    return result.scalar_one()
     # Calculate total amount
     total_amount = 0.0
     order_items = []
@@ -224,14 +233,23 @@ async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: st
         total_amount += total_price
         
         # Create order item (use slipper_id)
-        order_item = OrderItem(
-            slipper_id=item_data.slipper_id,
-            quantity=item_data.quantity,
-            unit_price=unit_price,
-            total_price=total_price,
-            notes=item_data.notes
-        )
-        order_items.append(order_item)
+        # Consolidate by slipper_id within this creation batch
+        existing = next((oi for oi in order_items if oi.slipper_id == item_data.slipper_id), None)
+        if existing:
+            existing.quantity += item_data.quantity
+            existing.unit_price = unit_price
+            existing.total_price = existing.unit_price * existing.quantity
+            if item_data.notes and not existing.notes:
+                existing.notes = item_data.notes
+        else:
+            order_item = OrderItem(
+                slipper_id=item_data.slipper_id,
+                quantity=item_data.quantity,
+                unit_price=unit_price,
+                total_price=total_price,
+                notes=item_data.notes
+            )
+            order_items.append(order_item)
     
     # Create order with temporary placeholder order_id if none provided
     provided_order_id = order.order_id
@@ -252,9 +270,20 @@ async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: st
         db.add(db_order)
 
     # Attach items
+    # Upsert items honoring unique (order_id, slipper_id)
+    existing_items_db = {it.slipper_id: it for it in (db_order.items or [])}
     for item in order_items:
         item.order_id = db_order.id
-        db.add(item)
+        if item.slipper_id in existing_items_db:
+            db_item = existing_items_db[item.slipper_id]
+            db_item.quantity += item.quantity
+            db_item.unit_price = item.unit_price
+            db_item.total_price = db_item.unit_price * db_item.quantity
+            if item.notes and not db_item.notes:
+                db_item.notes = item.notes
+            db.add(db_item)
+        else:
+            db.add(item)
 
     await db.commit()
     await db.refresh(db_order)
