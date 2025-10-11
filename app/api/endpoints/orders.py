@@ -41,8 +41,7 @@ async def create_order_endpoint(
     Create a new order. Available to all authenticated users.
     """
     logger.info(f"Creating order for user: {user.name} (Admin: {user.is_admin})")
-    # Prefer explicit payload items. If absent, fall back to the user's cart.
-    used_from_cart = False
+    # Require explicit payload items; do not auto-fallback to cart here to avoid accidental merges
     items_source: list[OrderItemCreate]
     if getattr(order, "items", None):
         items_source = [
@@ -55,26 +54,7 @@ async def create_order_endpoint(
             for it in order.items
         ]
     else:
-        # Build order from the current cart if no items explicitly provided
-        try:
-            from app.crud.cart import get_cart
-            cart = await get_cart(db, user.id)
-        except Exception as _e:
-            cart = None
-            logger.warning("Failed to load cart for order creation: %s", _e)
-        if cart and cart.items:
-            used_from_cart = True
-            items_source = [
-                OrderItemCreate(
-                    slipper_id=ci.slipper_id,
-                    quantity=ci.quantity,
-                    unit_price=1.0,  # ignored; CRUD fetches real price
-                    notes=None,
-                )
-                for ci in cart.items
-            ]
-        else:
-            raise HTTPException(status_code=400, detail="No items provided")
+        raise HTTPException(status_code=400, detail="Order items are required")
 
     # Set the user_id from the authenticated user
     internal_order = OrderCreate(
@@ -91,19 +71,7 @@ async def create_order_endpoint(
         idempotency_key=x_idempotency_key,
         merge_fallback=merge_flag,
     )
-    # If order was sourced from cart, align to cart total to avoid mismatch with UI
-    if used_from_cart:
-        try:
-            from app.crud.cart import get_cart_totals
-            _, _, cart_total = await get_cart_totals(db, user.id)
-            if cart_total and abs((new_order.total_amount or 0.0) - cart_total) > 0.5:
-                # Persist corrected total_amount
-                new_order.total_amount = float(cart_total)
-                db.add(new_order)
-                await db.commit()
-                await db.refresh(new_order)
-        except Exception as _e:
-            logger.warning("Failed to override order total from cart: %s", _e)
+    # No cart coupling here; totals are computed from exact items provided
 
     
     # Clear cache after creating order
@@ -114,9 +82,12 @@ async def create_order_endpoint(
     # IMPORTANT: Avoid accessing new_order.items directly (may trigger async lazy-load)
     # Fetch items explicitly to prevent MissingGreenlet
     items_result = await db.execute(
-        select(OrderItem).where(OrderItem.order_id == new_order.id)
+        select(OrderItem, Slipper)
+        .join(Slipper, Slipper.id == OrderItem.slipper_id)
+        .where(OrderItem.order_id == new_order.id)
+        .order_by(OrderItem.id.asc())
     )
-    items = items_result.scalars().all()
+    items = items_result.all()
     return {
         "order_id": new_order.order_id,
         "status": new_order.status.value if hasattr(new_order.status, 'value') else str(new_order.status),
@@ -131,8 +102,11 @@ async def create_order_endpoint(
                 "unit_price": oi.unit_price,
                 "total_price": oi.total_price,
                 "notes": oi.notes,
+                "name": getattr(sl, "name", None),
+                "size": getattr(sl, "size", None),
+                "image": getattr(sl, "image", None),
             }
-            for oi in items
+            for oi, sl in items
         ],
     }
 

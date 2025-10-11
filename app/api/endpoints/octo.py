@@ -19,6 +19,8 @@ class OctoCreateIn(BaseModel):
     # Accept multiple aliases from clients
     order_id: Optional[int] = Field(None, ge=1, description="Order ID")
     orderId: Optional[int] = Field(None, ge=1, description="Order ID alias")
+    # Optional: allow clients to send items directly (preferred over cart fallback)
+    items: Optional[list[dict]] = Field(None, description="Items to create order from if order_id not provided")
     # Optional amount passthrough (backend still uses order.total_amount by default)
     amount: Optional[int] = Field(None, ge=1)
     total_sum: Optional[int] = Field(None, ge=1)
@@ -69,18 +71,31 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
     from app.crud.order import get_order, update_order_payment_uuid
     # Normalize order_id from possible aliases
     oid = body.order_id or body.orderId
-    # If no order provided, create an order from the current user's cart now (pre-payment)
+    # If no order provided, create an order from provided items first, else from cart (pre-payment)
     if not oid:
         from app.schemas.order import OrderCreate, OrderItemCreate
         from app.crud.order import create_order
         from app.crud.cart import get_cart, get_cart_totals
-        cart = await get_cart(db, user.id)
-        if not cart or not cart.items:
-            raise HTTPException(status_code=400, detail="Cart is empty")
-        internal_order = OrderCreate(
-            order_id=None,
-            user_id=user.id,
-            items=[
+        internal_items: list[OrderItemCreate] | None = None
+        if body.items:
+            try:
+                internal_items = [
+                    OrderItemCreate(
+                        slipper_id=int(it.get("slipper_id")),
+                        quantity=int(it.get("quantity", 1)),
+                        unit_price=1.0,
+                        notes=it.get("notes"),
+                    )
+                    for it in body.items
+                    if it and it.get("slipper_id")
+                ]
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid items format")
+        if not internal_items:
+            cart = await get_cart(db, user.id)
+            if not cart or not cart.items:
+                raise HTTPException(status_code=400, detail="Cart is empty")
+            internal_items = [
                 OrderItemCreate(
                     slipper_id=ci.slipper_id,
                     quantity=ci.quantity,
@@ -88,7 +103,11 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
                     notes=None,
                 )
                 for ci in cart.items
-            ],
+            ]
+        internal_order = OrderCreate(
+            order_id=None,
+            user_id=user.id,
+            items=internal_items,
             notes=None,
         )
         created = await create_order(db, internal_order, idempotency_key=None, merge_fallback=False)
