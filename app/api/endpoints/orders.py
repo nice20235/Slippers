@@ -173,6 +173,7 @@ async def list_orders(
                     select(OrderItem, Slipper)
                     .join(Slipper, Slipper.id == OrderItem.slipper_id)
                     .where(OrderItem.order_id.in_(order_ids))
+                    .order_by(OrderItem.id.asc())
                 )
                 for oi, sl in data.all():
                     items_by_order.setdefault(oi.order_id, []).append({
@@ -271,6 +272,7 @@ async def get_order_endpoint(
             select(OrderItem, Slipper)
             .join(Slipper, Slipper.id == OrderItem.slipper_id)
             .where(OrderItem.order_id == db_order.id)
+            .order_by(OrderItem.id.asc())
         )
         items = [
             {
@@ -324,12 +326,34 @@ async def update_order_endpoint(order_id: int, order_update: OrderUpdate, db: As
     
     logger.info(f"Updating order {order_id} by user: {user.name} (Admin: {user.is_admin})")
     updated_order = await update_order(db, db_order, order_update)
-    
+
     # Clear cache after updating order
     from app.core.cache import invalidate_cache_pattern
     await invalidate_cache_pattern("orders:")
     await invalidate_cache_pattern(f"order:{order_id}:")
-    
+
+    # Explicitly reload items for this order to avoid any async lazy-load pitfalls
+    items_data = await db.execute(
+        select(OrderItem, Slipper)
+        .join(Slipper, Slipper.id == OrderItem.slipper_id)
+        .where(OrderItem.order_id == updated_order.id)
+        .order_by(OrderItem.id.asc())
+    )
+    items = [
+        {
+            "id": oi.id,
+            "slipper_id": oi.slipper_id,
+            "quantity": oi.quantity,
+            "unit_price": oi.unit_price,
+            "total_price": oi.total_price,
+            "notes": oi.notes,
+            "name": getattr(sl, "name", None),
+            "size": getattr(sl, "size", None),
+            "image": getattr(sl, "image", None),
+        }
+        for oi, sl in items_data.all()
+    ]
+
     return {
         "id": updated_order.id,
         "order_id": updated_order.order_id,
@@ -337,21 +361,9 @@ async def update_order_endpoint(order_id: int, order_update: OrderUpdate, db: As
         "status": updated_order.status.value if hasattr(updated_order.status, 'value') else str(updated_order.status),
         "total_amount": updated_order.total_amount,
         "notes": updated_order.notes,
-    "created_at": format_tashkent_compact(updated_order.created_at),
-    "updated_at": format_tashkent_compact(updated_order.updated_at),
-        "items": [
-            {
-                "id": item.id,
-                "slipper_id": item.slipper_id,
-                "quantity": item.quantity,
-                "unit_price": item.unit_price,
-                "total_price": item.total_price,
-                "notes": item.notes,
-                "name": item.slipper.name if item.slipper else None,
-                "size": item.slipper.size if item.slipper else None,
-                "image": item.slipper.image if item.slipper else None,
-            } for item in (updated_order.items or [])
-        ]
+        "created_at": format_tashkent_compact(updated_order.created_at),
+        "updated_at": format_tashkent_compact(updated_order.updated_at),
+        "items": items,
     }
 
 @router.delete("/{order_id}")
