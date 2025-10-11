@@ -134,13 +134,22 @@ app = FastAPI(
     redoc_url="/redoc", 
     openapi_url="/openapi.json")
 # CORS middleware configuration
-allowed = [o.strip() for o in settings.ALLOWED_ORIGINS.split(',') if o.strip()]
+# Normalize origins (strip spaces and trailing slashes) because browser Origin header never includes a trailing slash
+allowed = []
+for o in settings.ALLOWED_ORIGINS.split(','):
+    o = o.strip()
+    if not o:
+        continue
+    if o.endswith('/'):
+        o = o[:-1]
+    allowed.append(o)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "Refresh-Token", "Token-Type", "X-Expires-In"],
+    # Allow any request headers to avoid preflight rejections (covers X-Requested-With, X-Idempotency-Key, etc.)
+    allow_headers=["*"],
     expose_headers=["Authorization", "Refresh-Token", "Token-Type", "X-Expires-In"],
 )
 
@@ -160,6 +169,9 @@ _exclude = {p.strip() for p in settings.RATE_LIMIT_EXCLUDE_PATHS.split(',') if p
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
+    # Always let CORS preflight pass through quickly
+    if request.method == "OPTIONS":
+        return await call_next(request)
     path = request.url.path
     if path in _exclude:
         return await call_next(request)
