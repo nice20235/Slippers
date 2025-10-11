@@ -69,11 +69,46 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
     from app.crud.order import get_order, update_order_payment_uuid
     # Normalize order_id from possible aliases
     oid = body.order_id or body.orderId
+    # If no order provided, create an order from the current user's cart now (pre-payment)
     if not oid:
-        raise HTTPException(status_code=422, detail="order_id is required")
-    order = await get_order(db, oid, load_relationships=False)
+        from app.schemas.order import OrderCreate, OrderItemCreate
+        from app.crud.order import create_order
+        from app.crud.cart import get_cart, get_cart_totals
+        cart = await get_cart(db, user.id)
+        if not cart or not cart.items:
+            raise HTTPException(status_code=400, detail="Cart is empty")
+        internal_order = OrderCreate(
+            order_id=None,
+            user_id=user.id,
+            items=[
+                OrderItemCreate(
+                    slipper_id=ci.slipper_id,
+                    quantity=ci.quantity,
+                    unit_price=1.0,
+                    notes=None,
+                )
+                for ci in cart.items
+            ],
+            notes=None,
+        )
+        created = await create_order(db, internal_order, idempotency_key=None, merge_fallback=False)
+        # Align total to cart total
+        _, _, cart_total = await get_cart_totals(db, user.id)
+        if cart_total and abs((created.total_amount or 0.0) - cart_total) > 0.5:
+            created.total_amount = float(cart_total)
+            db.add(created)
+            await db.commit()
+            await db.refresh(created)
+        oid = created.id
+    order = await get_order(db, int(oid), load_relationships=False)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    # Enforce ownership
+    if order.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Order does not belong to current user")
+    # Ensure the current user owns the order
+    if order.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not allowed to pay for this order")
     if order.status == OrderStatus.REFUNDED:
         raise HTTPException(status_code=400, detail="Cannot create payment for refunded order")
     # Idempotency: if order already has a payment_uuid and still pending, just reuse
@@ -249,6 +284,15 @@ async def octo_notify(request: Request, db: AsyncSession = Depends(get_db)):
             try:
                 await update_order_status(db, updated.order_id, OrderStatus.PAID)
                 logger.info("Order %s set to PAID due to successful payment %s", updated.order_id, updated.id)
+                # Clear the purchaser's cart after successful payment
+                try:
+                    from app.crud.order import get_order as _get_order
+                    from app.crud.cart import clear_cart as _clear_cart
+                    paid_order = await _get_order(db, updated.order_id, load_relationships=False)
+                    if paid_order:
+                        await _clear_cart(db, paid_order.user_id)
+                except Exception as e:
+                    logger.warning("Failed to clear cart after payment: %s", e)
             except Exception as e:
                 logger.warning("Failed to update order %s status after payment: %s", updated.order_id, e)
         elif mapped == PaymentStatus.REFUNDED:
@@ -257,8 +301,12 @@ async def octo_notify(request: Request, db: AsyncSession = Depends(get_db)):
                 logger.info("Order %s set to REFUNDED due to refund of payment %s", updated.order_id, updated.id)
             except Exception as e:
                 logger.warning("Failed to update order %s status after refund: %s", updated.order_id, e)
-    elif mapped == PaymentStatus.PAID:
-        logger.warning("Payment %s marked PAID but not linked to any order. Ensure orderId is sent on create.", getattr(updated, "id", None))
+    else:
+        if mapped == PaymentStatus.PAID:
+            logger.warning(
+                "Payment %s marked PAID but not linked to any order. Ensure orderId is sent on create.",
+                getattr(updated, "id", None),
+            )
     # Invalidate caches so clients don't see stale 'pending' orders
     try:
         await invalidate_cache_pattern("orders:")

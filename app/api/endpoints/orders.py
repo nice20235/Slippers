@@ -97,12 +97,6 @@ async def create_order_endpoint(
     except Exception as _e:
         logger.warning("Failed to override order total from cart: %s", _e)
 
-    # Clear cart after order creation to avoid future accidental merges or stale items
-    try:
-        from app.crud.cart import clear_cart
-        await clear_cart(db, user.id)
-    except Exception as _e:
-        logger.warning("Failed to clear cart after order creation: %s", _e)
     
     # Clear cache after creating order
     from app.core.cache import invalidate_cache_pattern
