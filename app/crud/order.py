@@ -215,7 +215,7 @@ async def create_order(db: AsyncSession, order: OrderCreate, idempotency_key: st
             )
             .where(Order.id == merge_target.id)
         )
-    return result.scalar_one()
+        return result.scalar_one()
     # Calculate total amount
     total_amount = 0.0
     order_items = []
