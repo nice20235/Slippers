@@ -132,10 +132,10 @@ ENV/
 env.bak/
 venv.bak/
 
-
-echo "*.db-shm" >> .gitignore
-echo "*.db-wal" >> .gitignore
-echo "*.db-journal" >> .gitignore
+# SQLite runtime artifacts (should never be tracked)
+*.db-shm
+*.db-wal
+*.db-journal
 
 
 # Spyder project settings
