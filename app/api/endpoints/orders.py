@@ -62,6 +62,18 @@ async def create_order_endpoint(
         idempotency_key=x_idempotency_key,
         merge_fallback=merge_flag,
     )
+    # Authoritative total: use current cart total to avoid any mismatch
+    try:
+        from app.crud.cart import get_cart_totals
+        _, _, cart_total = await get_cart_totals(db, user.id)
+        if cart_total and abs((new_order.total_amount or 0.0) - cart_total) > 0.5:
+            # Persist corrected total_amount
+            new_order.total_amount = float(cart_total)
+            db.add(new_order)
+            await db.commit()
+            await db.refresh(new_order)
+    except Exception as _e:
+        logger.warning("Failed to override order total from cart: %s", _e)
     
     # Clear cache after creating order
     from app.core.cache import invalidate_cache_pattern
