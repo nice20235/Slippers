@@ -19,9 +19,9 @@ from app.crud.order import (
 )
 from app.models.payment import PaymentStatus
 from app.models.order import OrderItem
+from app.models.slipper import Slipper
 from app.core.timezone import to_tashkent, format_tashkent_compact
 from app.auth.dependencies import get_current_user, get_current_admin
-from app.core.cache import cached
 import logging
 
 # Set up logging
@@ -131,7 +131,6 @@ async def create_order_endpoint(
     }
 
 @router.get("/")
-@cached(ttl=60, key_prefix="orders")
 async def list_orders(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
@@ -154,18 +153,39 @@ async def list_orders(
             statuses = [PaymentStatus.PAID, PaymentStatus.REFUNDED]
             if user.is_admin:
                 logger.info("Admin %s listing orders with finance filter paid_refunded", user.name)
-                rows, total = await get_orders_by_payment_statuses(db, statuses=statuses, load_relationships=True)
+                rows, total = await get_orders_by_payment_statuses(db, statuses=statuses, load_relationships=False)
             else:
                 logger.info("User %s listing OWN orders with finance filter paid_refunded", user.name)
-                rows, total = await get_orders_by_payment_statuses(db, statuses=statuses, user_id=user.id, load_relationships=True)
+                rows, total = await get_orders_by_payment_statuses(db, statuses=statuses, user_id=user.id, load_relationships=False)
             # rows are tuples (order, payment_status)
+            # Batch load items for all orders
+            orders_only = [order for order, _ in rows]
+            order_ids = [o.id for o in orders_only]
+            items_by_order: dict[int, list[dict]] = {}
+            if order_ids:
+                data = await db.execute(
+                    select(OrderItem, Slipper)
+                    .join(Slipper, Slipper.id == OrderItem.slipper_id)
+                    .where(OrderItem.order_id.in_(order_ids))
+                )
+                for oi, sl in data.all():
+                    items_by_order.setdefault(oi.order_id, []).append({
+                        "slipper_id": oi.slipper_id,
+                        "quantity": oi.quantity,
+                        "unit_price": oi.unit_price,
+                        "total_price": oi.total_price,
+                        "name": getattr(sl, "name", None),
+                        "size": getattr(sl, "size", None),
+                        "image": getattr(sl, "image", None),
+                    })
+
             result = []
             for order, pay_status in rows:
                 result.append({
                     "id": order.id,
                     "order_id": order.order_id,
                     "user_id": order.user_id,
-                    "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
+                    "user_name": None,  # omit extra user load to avoid N+1
                     "status": order.status.value,
                     "payment_status": (
                         "success" if pay_status == PaymentStatus.PAID else (
@@ -175,50 +195,47 @@ async def list_orders(
                     "total_amount": order.total_amount,
                     "created_at": format_tashkent_compact(order.created_at),
                     "updated_at": format_tashkent_compact(order.updated_at),
-                    "items": [
-                        {
-                            "slipper_id": item.slipper_id,
-                            "quantity": item.quantity,
-                            "unit_price": item.unit_price,
-                            "total_price": item.total_price,
-                            "name": item.slipper.name if item.slipper else None,
-                            "size": item.slipper.size if item.slipper else None,
-                            "image": item.slipper.image if item.slipper else None,
-                        }
-                        for item in (order.items or [])
-                    ],
+                    "items": items_by_order.get(order.id, []),
                 })
             return result
         else:
             if user.is_admin:
                 logger.info(f"Admin {user.name} listing ALL orders")
-                orders, total = await get_orders(db, skip=0, limit=100000, load_relationships=True)
+                orders, total = await get_orders(db, skip=0, limit=100000, load_relationships=False)
             else:
                 logger.info(f"User {user.name} listing OWN orders")
-                orders, total = await get_orders(db, skip=0, limit=100000, user_id=user.id, load_relationships=True)
+                orders, total = await get_orders(db, skip=0, limit=100000, user_id=user.id, load_relationships=False)
+            # Batch load items for all orders
+            order_ids = [o.id for o in orders]
+            items_by_order: dict[int, list[dict]] = {}
+            if order_ids:
+                data = await db.execute(
+                    select(OrderItem, Slipper)
+                    .join(Slipper, Slipper.id == OrderItem.slipper_id)
+                    .where(OrderItem.order_id.in_(order_ids))
+                )
+                for oi, sl in data.all():
+                    items_by_order.setdefault(oi.order_id, []).append({
+                        "slipper_id": oi.slipper_id,
+                        "quantity": oi.quantity,
+                        "unit_price": oi.unit_price,
+                        "total_price": oi.total_price,
+                        "name": getattr(sl, "name", None),
+                        "size": getattr(sl, "size", None),
+                        "image": getattr(sl, "image", None),
+                    })
 
             return [
                 {
                     "id": order.id,
                     "order_id": order.order_id,
                     "user_id": order.user_id,
-                    "user_name": order.user.name if hasattr(order, 'user') and order.user else None,
+                    "user_name": None,
                     "status": order.status.value,
                     "total_amount": order.total_amount,
                     "created_at": format_tashkent_compact(order.created_at),
                     "updated_at": format_tashkent_compact(order.updated_at),
-                    "items": [
-                        {
-                            "slipper_id": item.slipper_id,
-                            "quantity": item.quantity,
-                            "unit_price": item.unit_price,
-                            "total_price": item.total_price,
-                            "name": item.slipper.name if item.slipper else None,
-                            "size": item.slipper.size if item.slipper else None,
-                            "image": item.slipper.image if item.slipper else None,
-                        }
-                        for item in (order.items or [])
-                    ],
+                    "items": items_by_order.get(order.id, []),
                 }
                 for order in orders
             ]
@@ -227,7 +244,6 @@ async def list_orders(
         raise HTTPException(status_code=500, detail="Error fetching orders")
 
 @router.get("/{order_id}")
-@cached(ttl=300, key_prefix="order")
 async def get_order_endpoint(
     order_id: int, 
     db: AsyncSession = Depends(get_db), 
@@ -235,7 +251,7 @@ async def get_order_endpoint(
 ):
     """Get a specific order by ID"""
     try:
-        db_order = await get_order(db, order_id, load_relationships=True)
+        db_order = await get_order(db, order_id, load_relationships=False)
         if not db_order:
             raise HTTPException(status_code=404, detail="Order not found")
         
@@ -244,6 +260,27 @@ async def get_order_endpoint(
             logger.warning(f"User {user.name} attempted to access order {order_id} belonging to user {db_order.user_id}")
             raise HTTPException(status_code=403, detail="Not authorized to access this order")
         
+        # Fetch items explicitly to avoid any lazy-load issues and ensure correctness
+        items_data = await db.execute(
+            select(OrderItem, Slipper)
+            .join(Slipper, Slipper.id == OrderItem.slipper_id)
+            .where(OrderItem.order_id == db_order.id)
+        )
+        items = [
+            {
+                "id": oi.id,
+                "slipper_id": oi.slipper_id,
+                "quantity": oi.quantity,
+                "unit_price": oi.unit_price,
+                "total_price": oi.total_price,
+                "notes": oi.notes,
+                "name": getattr(sl, "name", None),
+                "size": getattr(sl, "size", None),
+                "image": getattr(sl, "image", None),
+            }
+            for oi, sl in items_data.all()
+        ]
+
         return {
             "id": db_order.id,
             "order_id": db_order.order_id,
@@ -253,19 +290,7 @@ async def get_order_endpoint(
             "notes": db_order.notes,
             "created_at": format_tashkent_compact(db_order.created_at),
             "updated_at": format_tashkent_compact(db_order.updated_at),
-            "items": [
-                {
-                    "id": item.id,
-                    "slipper_id": item.slipper_id,
-                    "quantity": item.quantity,
-                    "unit_price": item.unit_price,
-                    "total_price": item.total_price,
-                    "notes": item.notes,
-                    "name": item.slipper.name if item.slipper else None,
-                    "size": item.slipper.size if item.slipper else None,
-                    "image": item.slipper.image if item.slipper else None,
-                } for item in (db_order.items or [])
-            ]
+            "items": items,
         }
         
     except HTTPException:
