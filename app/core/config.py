@@ -12,7 +12,14 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 1  # Reduced from 7 to 1 day  
     SESSION_MAX_DAYS: int = 1  # Absolute maximum session lifetime (sliding disabled past this). 0 disables hard cap.
     SESSION_MAX_HOURS: int = 8  # Alternative to DAYS. If >0, hours takes precedence. Reduced from 12 to 8.
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000,https://www.optomoyoqkiyim.uz/"
+    ALLOWED_ORIGINS: str = (
+        "http://localhost:3000,"
+        "http://127.0.0.1:3000,"
+        "https://optomoyoqkiyim.uz,"
+        "https://www.optomoyoqkiyim.uz"
+    )
+    # Allow any subdomain on production domain by default (www, ru., uz., etc.)
+    ALLOWED_ORIGIN_REGEX: str | None = r"^https?://(.+\.)?optomoyoqkiyim\.uz$"
     LOGIN_RATE_LIMIT: int = 5  # попыток
     LOGIN_RATE_WINDOW_SEC: int = 300  # окно в секундах (5 минут)
     COOKIE_SAMESITE: str = "lax"  # options: 'lax', 'strict', 'none'

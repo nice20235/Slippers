@@ -133,25 +133,40 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc", 
     openapi_url="/openapi.json")
-# CORS middleware configuration
-# Normalize origins (strip spaces and trailing slashes) because browser Origin header never includes a trailing slash
-allowed = []
+"""CORS middleware configuration
+We support both a concrete allow_origins list and a regex (allow_origin_regex) to
+cover www/non-www and subdomain variants. Trailing slashes are stripped since
+the browser's Origin header never contains them. If ALLOWED_ORIGIN_REGEX is set,
+it takes precedence over the explicit list.
+"""
+# Normalize origins
+allowed: list[str] = []
 for o in settings.ALLOWED_ORIGINS.split(','):
-    o = o.strip()
+    o = (o or "").strip()
     if not o:
         continue
     if o.endswith('/'):
         o = o[:-1]
     allowed.append(o)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed,
+
+cors_kwargs = dict(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     # Allow any request headers to avoid preflight rejections (covers X-Requested-With, X-Idempotency-Key, etc.)
     allow_headers=["*"],
     expose_headers=["Authorization", "Refresh-Token", "Token-Type", "X-Expires-In"],
 )
+
+# Prefer regex if configured
+if getattr(settings, "ALLOWED_ORIGIN_REGEX", None):
+    cors_kwargs["allow_origin_regex"] = settings.ALLOWED_ORIGIN_REGEX
+else:
+    cors_kwargs["allow_origins"] = allowed
+
+# Startup log for visibility
+print(f"[CORS] allowed_origins={allowed} regex={getattr(settings, 'ALLOWED_ORIGIN_REGEX', None)}")
+
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 # Performance middleware
 app.add_middleware(PerformanceMiddleware)
