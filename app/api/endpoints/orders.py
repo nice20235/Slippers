@@ -110,6 +110,95 @@ async def create_order_endpoint(
         ],
     }
 
+@router.post("/from-cart")
+async def create_order_from_cart(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+    clear_cart: bool = Query(False, description="If true, clears cart after creating the order"),
+):
+    """Create a new order from the current user's cart items.
+    If `clear_cart=true` is provided, the user's cart will be emptied after order creation.
+    """
+    from app.crud.cart import get_cart, get_cart_totals, clear_cart as clear_cart_fn
+    from app.schemas.order import OrderCreate, OrderItemCreate
+
+    cart = await get_cart(db, user.id)
+    if not cart or not cart.items:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+
+    # Build items from cart lines; unit_price is determined from DB at creation time
+    items_source: list[OrderItemCreate] = [
+        OrderItemCreate(
+            slipper_id=ci.slipper_id,
+            quantity=ci.quantity,
+            unit_price=1.0,
+            notes=None,
+        )
+        for ci in cart.items
+    ]
+
+    internal_order = OrderCreate(
+        order_id=None,
+        user_id=user.id,
+        items=items_source,
+        notes=None,
+    )
+    new_order = await create_order(
+        db,
+        internal_order,
+        idempotency_key=None,
+        merge_fallback=False,
+    )
+
+    # Align total to cart total for consistency
+    _, _, cart_total = await get_cart_totals(db, user.id)
+    if cart_total and abs((new_order.total_amount or 0.0) - cart_total) > 0.5:
+        new_order.total_amount = float(cart_total)
+        db.add(new_order)
+        await db.commit()
+        await db.refresh(new_order)
+
+    # Optionally clear cart after order creation (opt-in)
+    if clear_cart:
+        try:
+            await clear_cart_fn(db, user.id)
+        except Exception as e:
+            logger.warning("Failed to clear cart after order creation: %s", e)
+
+    # Invalidate caches
+    from app.core.cache import invalidate_cache_pattern
+    await invalidate_cache_pattern("orders:")
+
+    created_compact = format_tashkent_compact(new_order.created_at)
+    # Explicitly fetch items for response
+    items_result = await db.execute(
+        select(OrderItem, Slipper)
+        .join(Slipper, Slipper.id == OrderItem.slipper_id)
+        .where(OrderItem.order_id == new_order.id)
+        .order_by(OrderItem.id.asc())
+    )
+    items = items_result.all()
+    return {
+        "order_id": new_order.order_id,
+        "status": new_order.status.value if hasattr(new_order.status, 'value') else str(new_order.status),
+        "total_amount": new_order.total_amount,
+        "notes": new_order.notes,
+        "created_at": created_compact,
+        "items": [
+            {
+                "slipper_id": oi.slipper_id,
+                "quantity": oi.quantity,
+                "unit_price": oi.unit_price,
+                "total_price": oi.total_price,
+                "notes": oi.notes,
+                "name": getattr(sl, "name", None),
+                "size": getattr(sl, "size", None),
+                "image": getattr(sl, "image", None),
+            }
+            for oi, sl in items
+        ],
+    }
+
 @router.get("/")
 async def list_orders(
     db: AsyncSession = Depends(get_db),

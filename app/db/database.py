@@ -290,6 +290,64 @@ async def init_db():
         except Exception as e:
             logger.warning("Duplicate order_items consolidation skipped/failed: %s", e)
 
+        # --- Safeguards for cart integrity: enforce single cart per user and consolidate duplicate cart_items ---
+        try:
+            # Ensure at most one cart per user (application logic expects 1:1)
+            try:
+                await conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_carts_user ON carts(user_id);"
+                )
+            except Exception:
+                pass
+
+            # Consolidate duplicate lines by (cart_id, slipper_id)
+            await conn.exec_driver_sql("DROP TABLE IF EXISTS ci_sums;")
+            await conn.exec_driver_sql("DROP TABLE IF EXISTS ci_keepers;")
+            await conn.exec_driver_sql(
+                """
+                CREATE TEMP TABLE ci_sums AS
+                SELECT cart_id, slipper_id, SUM(quantity) AS sum_qty
+                FROM cart_items
+                GROUP BY cart_id, slipper_id;
+                """
+            )
+            await conn.exec_driver_sql(
+                """
+                CREATE TEMP TABLE ci_keepers AS
+                SELECT MIN(id) AS keep_id, cart_id, slipper_id
+                FROM cart_items
+                GROUP BY cart_id, slipper_id;
+                """
+            )
+            # Update the keeper rows to consolidated quantity
+            await conn.exec_driver_sql(
+                """
+                UPDATE cart_items
+                SET quantity = (
+                    SELECT s.sum_qty FROM ci_sums s
+                    WHERE s.cart_id = cart_items.cart_id AND s.slipper_id = cart_items.slipper_id
+                )
+                WHERE id IN (SELECT keep_id FROM ci_keepers);
+                """
+            )
+            # Delete non-keeper duplicates
+            await conn.exec_driver_sql(
+                """
+                DELETE FROM cart_items
+                WHERE id NOT IN (SELECT keep_id FROM ci_keepers);
+                """
+            )
+            # Enforce unique constraint to prevent future duplicates
+            try:
+                await conn.exec_driver_sql(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_cart_items_cart_slipper ON cart_items(cart_id, slipper_id);"
+                )
+            except Exception:
+                pass
+            logger.info("✅ Consolidated duplicate cart_items and enforced unique constraints")
+        except Exception as e:
+            logger.warning("Cart integrity safeguards skipped/failed: %s", e)
+
 # Close database connections
 async def close_db():
     """Close database connections"""

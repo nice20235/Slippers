@@ -21,9 +21,11 @@ async def _reload_cart(db: AsyncSession, cart_id: int) -> Cart:
     return q.scalar_one()
 
 async def get_or_create_cart(db: AsyncSession, user_id: int) -> Cart:
+    # Deterministically pick the oldest cart if duplicates exist (data repair may still be running)
     q = await db.execute(
         select(Cart)
         .where(Cart.user_id == user_id)
+        .order_by(Cart.id.asc())
         .options(*_cart_with_items())
     )
     cart = q.scalar_one_or_none()
