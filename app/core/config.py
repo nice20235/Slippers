@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = (
         "http://localhost:3000,"
         "http://127.0.0.1:3000,"
+        "http://localhost:5173,"
+        "https://oyoqkiyim.duckdns.org,"
         "https://optomoyoqkiyim.uz,"
         "https://www.optomoyoqkiyim.uz"
     )

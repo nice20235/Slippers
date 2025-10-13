@@ -157,16 +157,14 @@ cors_kwargs = dict(
     expose_headers=["Authorization", "Refresh-Token", "Token-Type", "X-Expires-In"],
 )
 
-# Prefer regex if configured
+# Allow both explicit origins and regex simultaneously.
+# This ensures localhost works in development even when a production regex is configured.
+cors_kwargs["allow_origins"] = allowed
 if getattr(settings, "ALLOWED_ORIGIN_REGEX", None):
     cors_kwargs["allow_origin_regex"] = settings.ALLOWED_ORIGIN_REGEX
-else:
-    cors_kwargs["allow_origins"] = allowed
 
 # Startup log for visibility
 print(f"[CORS] allowed_origins={allowed} regex={getattr(settings, 'ALLOWED_ORIGIN_REGEX', None)}")
-
-app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 # Performance middleware
 app.add_middleware(PerformanceMiddleware)
@@ -186,7 +184,11 @@ _exclude = {p.strip() for p in settings.RATE_LIMIT_EXCLUDE_PATHS.split(',') if p
 async def rate_limit_middleware(request: Request, call_next):
     # Always let CORS preflight pass through quickly
     if request.method == "OPTIONS":
-        return await call_next(request)
+        # Return minimal OK for preflight if another route/middleware doesn't handle it
+        response = JSONResponse(status_code=200, content={})
+        # When allow_credentials is true, Access-Control-Allow-Origin cannot be '*', so FastAPI's CORS
+        # will set the echo origin. Here we just return early to avoid other middlewares blocking it.
+        return response
     path = request.url.path
     if path in _exclude:
         return await call_next(request)
@@ -223,6 +225,10 @@ async def rate_limit_middleware(request: Request, call_next):
     reset_in = int(max(0, window - (now - dq[0]))) if dq else window
     response.headers["X-RateLimit-Reset"] = str(reset_in)
     return response
+
+# Register CORS middleware LAST so it becomes the outermost middleware and reliably
+# handles preflight OPTIONS before other middlewares can interfere.
+app.add_middleware(CORSMiddleware, **cors_kwargs)
 
 # Global exception handler
 @app.exception_handler(Exception)
