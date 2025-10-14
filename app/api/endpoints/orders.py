@@ -230,6 +230,14 @@ async def list_orders(
             # Batch load items for all orders
             orders_only = [order for order, _ in rows]
             order_ids = [o.id for o in orders_only]
+            # Batch load users for these orders to avoid N+1
+            user_ids = list({o.user_id for o in orders_only})
+            users_by_id: dict[int, tuple[str, str]] = {}
+            if user_ids:
+                from app.models.user import User as _User
+                user_rows = await db.execute(select(_User.id, _User.name, _User.surname).where(_User.id.in_(user_ids)))
+                for uid, nm, sn in user_rows.all():
+                    users_by_id[int(uid)] = (nm, sn)
             items_by_order: dict[int, list[dict]] = {}
             if order_ids:
                 data = await db.execute(
@@ -251,11 +259,15 @@ async def list_orders(
 
             result = []
             for order, pay_status in rows:
+                full_name = None
+                tup = users_by_id.get(order.user_id)
+                if tup:
+                    full_name = f"{tup[0]} {tup[1]}".strip()
                 result.append({
                     "id": order.id,
                     "order_id": order.order_id,
                     "user_id": order.user_id,
-                    "user_name": None,  # omit extra user load to avoid N+1
+                    "user_name": full_name,
                     "status": order.status.value,
                     "payment_status": (
                         "success" if pay_status == PaymentStatus.PAID else (
@@ -277,6 +289,13 @@ async def list_orders(
                 orders, total = await get_orders(db, skip=0, limit=100000, user_id=user.id, load_relationships=False)
             # Batch load items for all orders
             order_ids = [o.id for o in orders]
+            user_ids = list({o.user_id for o in orders})
+            users_by_id: dict[int, tuple[str, str]] = {}
+            if user_ids:
+                from app.models.user import User as _User
+                user_rows = await db.execute(select(_User.id, _User.name, _User.surname).where(_User.id.in_(user_ids)))
+                for uid, nm, sn in user_rows.all():
+                    users_by_id[int(uid)] = (nm, sn)
             items_by_order: dict[int, list[dict]] = {}
             if order_ids:
                 data = await db.execute(
@@ -300,7 +319,7 @@ async def list_orders(
                     "id": order.id,
                     "order_id": order.order_id,
                     "user_id": order.user_id,
-                    "user_name": None,
+                    "user_name": (f"{users_by_id[order.user_id][0]} {users_by_id[order.user_id][1]}".strip() if order.user_id in users_by_id else None),
                     "status": order.status.value,
                     "total_amount": order.total_amount,
                     "created_at": format_tashkent_compact(order.created_at),
