@@ -92,12 +92,7 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
         "total_sum": float(total_sum),
         "currency": settings.OCTO_CURRENCY,
         "description": description,
-        # Simplified payment methods per docs schema
-        "payment_methods": [
-            {"method": "bank_card"},
-            {"method": "uzcard"},
-            {"method": "humo"},
-        ],
+            # Intentionally omit payment_methods so OCTO shows all enabled methods for the merchant
         "return_url": settings.OCTO_RETURN_URL,
         "notify_url": settings.OCTO_NOTIFY_URL,
         "language": settings.OCTO_LANGUAGE,
