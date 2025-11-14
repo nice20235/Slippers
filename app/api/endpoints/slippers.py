@@ -15,6 +15,7 @@ from app.crud.slipper import (
 	get_category,
 )
 from app.schemas.slipper import SlipperCreate, SlipperUpdate
+from app.core.serializers import slipper_to_dict
 
 
 logger = logging.getLogger(__name__)
@@ -50,35 +51,7 @@ async def read_slippers(
 
 		items = []
 		for s in slippers:
-			item = {
-				"id": s.id,
-				"name": s.name,
-				"size": s.size,
-				"price": s.price,
-				"quantity": s.quantity,
-				"category_id": s.category_id,
-				"category_name": s.category.name if getattr(s, "category", None) else None,
-				"image": s.image,
-				"is_available": s.quantity > 0,
-			}
-			# Always include a gallery when images are requested; order by order_index and ensure primary first
-			if include_images and hasattr(s, "images"):
-				images_sorted = sorted(s.images, key=lambda im: (0 if im.is_primary else 1, im.order_index))
-				item["images"] = [
-					{
-						"id": img.id,
-						"image_path": img.image_path,
-						"is_primary": img.is_primary,
-						"alt_text": img.alt_text,
-						"order_index": img.order_index,
-					}
-					for img in images_sorted
-				]
-				# Convenience flat list for frontend galleries
-				item["image_gallery"] = [img.image_path for img in images_sorted]
-				# Explicit primary image path (falls back to main field)
-				item["primary_image"] = next((img.image_path for img in images_sorted if img.is_primary), s.image)
-			items.append(item)
+			items.append(slipper_to_dict(s, include_images=include_images))
 
 		return {
 			"items": items,
@@ -107,17 +80,7 @@ async def read_slipper(
 		if slipper is None:
 			raise HTTPException(status_code=404, detail="Slipper not found")
 
-		response = {
-			"id": slipper.id,
-			"name": slipper.name,
-			"size": slipper.size,
-			"price": slipper.price,
-			"quantity": slipper.quantity,
-			"category_id": slipper.category_id,
-			"category_name": slipper.category.name if getattr(slipper, "category", None) else None,
-			"image": slipper.image,
-			"is_available": slipper.quantity > 0,
-		}
+		response = slipper_to_dict(slipper, include_images=include_images)
 
 		# Optional timestamps
 		if hasattr(slipper, "created_at") and slipper.created_at is not None:
@@ -131,20 +94,7 @@ async def read_slipper(
 			except Exception:
 				pass
 
-		if include_images and hasattr(slipper, "images"):
-			images_sorted = sorted(slipper.images, key=lambda im: (0 if im.is_primary else 1, im.order_index))
-			response["images"] = [
-				{
-					"id": img.id,
-					"image_path": img.image_path,
-					"is_primary": img.is_primary,
-					"alt_text": img.alt_text,
-					"order_index": img.order_index,
-				}
-				for img in images_sorted
-			]
-			response["image_gallery"] = [img.image_path for img in images_sorted]
-			response["primary_image"] = next((img.image_path for img in images_sorted if img.is_primary), response["image"])
+		# response already includes images when requested; timestamps are added below
 
 		return response
 	except HTTPException:
