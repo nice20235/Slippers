@@ -62,11 +62,15 @@ async def get_slippers(
 	limit: int = 100,
 	category_id: Optional[int] = None,
 	search: Optional[str] = None,
-	sort: str = "name_asc"
+	sort: str = "name_asc",
+	load_images: bool = False,
 ) -> Tuple[List[Slipper], int]:
 	"""Get slippers with pagination and filters - optimized"""
 	# Build base query with efficient loading
 	query = select(Slipper).options(joinedload(Slipper.category))
+	if load_images:
+		from sqlalchemy.orm import selectinload
+		query = query.options(selectinload(Slipper.images))
 	conditions = []
 	
 	# Apply filters

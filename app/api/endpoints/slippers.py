@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Optional
 import os
-from uuid import uuid4
 import logging
+
 from app.db.database import get_db
 from app.auth.dependencies import get_current_admin
 from app.core.cache import cached
@@ -14,11 +14,10 @@ from app.crud.slipper import (
 	delete_slipper,
 	get_category,
 )
+from app.schemas.slipper import SlipperCreate, SlipperUpdate
 
 
-# Set up logging
 logger = logging.getLogger(__name__)
-
 
 router = APIRouter()
 
@@ -34,6 +33,7 @@ async def read_slippers(
 		"id_desc",
 		description="Sort order: id_asc,id_desc,name_asc,name_desc,price_asc,price_desc,created_asc,created_desc",
 	),
+	include_images: bool = Query(True, description="Include images array for each slipper"),
 	db: AsyncSession = Depends(get_db),
 ):
 	"""Get all slippers with filtering, pagination, search and sorting."""
@@ -45,22 +45,40 @@ async def read_slippers(
 			category_id=category_id,
 			search=search,
 			sort=sort,
+			load_images=include_images,
 		)
 
-		items = [
-			{
+		items = []
+		for s in slippers:
+			item = {
 				"id": s.id,
 				"name": s.name,
 				"size": s.size,
 				"price": s.price,
 				"quantity": s.quantity,
 				"category_id": s.category_id,
-				"category_name": s.category.name if s.category else None,
+				"category_name": s.category.name if getattr(s, "category", None) else None,
 				"image": s.image,
 				"is_available": s.quantity > 0,
 			}
-			for s in slippers
-		]
+			# Always include a gallery when images are requested; order by order_index and ensure primary first
+			if include_images and hasattr(s, "images"):
+				images_sorted = sorted(s.images, key=lambda im: (0 if im.is_primary else 1, im.order_index))
+				item["images"] = [
+					{
+						"id": img.id,
+						"image_path": img.image_path,
+						"is_primary": img.is_primary,
+						"alt_text": img.alt_text,
+						"order_index": img.order_index,
+					}
+					for img in images_sorted
+				]
+				# Convenience flat list for frontend galleries
+				item["image_gallery"] = [img.image_path for img in images_sorted]
+				# Explicit primary image path (falls back to main field)
+				item["primary_image"] = next((img.image_path for img in images_sorted if img.is_primary), s.image)
+			items.append(item)
 
 		return {
 			"items": items,
@@ -80,7 +98,7 @@ async def read_slippers(
 @cached(ttl=600, key_prefix="slipper")
 async def read_slipper(
 	slipper_id: int,
-	include_images: bool = Query(False, description="Include slipper images"),
+	include_images: bool = Query(True, description="Include slipper images"),
 	db: AsyncSession = Depends(get_db),
 ):
 	"""Get a specific slipper by ID with optional image loading."""
@@ -96,14 +114,25 @@ async def read_slipper(
 			"price": slipper.price,
 			"quantity": slipper.quantity,
 			"category_id": slipper.category_id,
-			"category_name": slipper.category.name if slipper.category else None,
+			"category_name": slipper.category.name if getattr(slipper, "category", None) else None,
 			"image": slipper.image,
 			"is_available": slipper.quantity > 0,
-			"created_at": slipper.created_at.isoformat(),
-			"updated_at": slipper.updated_at.isoformat() if slipper.updated_at else None,
 		}
 
+		# Optional timestamps
+		if hasattr(slipper, "created_at") and slipper.created_at is not None:
+			try:
+				response["created_at"] = slipper.created_at.isoformat()  # type: ignore[attr-defined]
+			except Exception:
+				pass
+		if hasattr(slipper, "updated_at") and slipper.updated_at is not None:
+			try:
+				response["updated_at"] = slipper.updated_at.isoformat()  # type: ignore[attr-defined]
+			except Exception:
+				pass
+
 		if include_images and hasattr(slipper, "images"):
+			images_sorted = sorted(slipper.images, key=lambda im: (0 if im.is_primary else 1, im.order_index))
 			response["images"] = [
 				{
 					"id": img.id,
@@ -112,8 +141,10 @@ async def read_slipper(
 					"alt_text": img.alt_text,
 					"order_index": img.order_index,
 				}
-				for img in slipper.images
+				for img in images_sorted
 			]
+			response["image_gallery"] = [img.image_path for img in images_sorted]
+			response["primary_image"] = next((img.image_path for img in images_sorted if img.is_primary), response["image"])
 
 		return response
 	except HTTPException:
@@ -123,11 +154,6 @@ async def read_slipper(
 		raise HTTPException(status_code=500, detail="Error fetching slipper")
 
 
-
-
-
-from app.schemas.slipper import SlipperCreate, SlipperUpdate
-
 @router.post("/", summary="Создать тапочку (без картинки)")
 async def create_new_slipper(
 	slipper: SlipperCreate,
@@ -136,14 +162,6 @@ async def create_new_slipper(
 ):
 	"""
 	Создать новую тапочку (admin only) через JSON. Картинку загружать отдельным запросом.
-	Пример запроса (application/json):
-	{
-	  "name": "Cozy Home Slipper",
-	  "size": "42",
-	  "price": 25.99,
-	  "quantity": 50,
-	  "category_id": 1
-	}
 	"""
 	# Проверяем категорию
 	if slipper.category_id:
@@ -163,10 +181,10 @@ async def create_new_slipper(
 	db.add(db_slipper)
 	await db.commit()
 	await db.refresh(db_slipper)
-	
+
 	from app.core.cache import invalidate_cache_pattern
 	await invalidate_cache_pattern("slippers:")
-	
+
 	return {
 		"id": db_slipper.id,
 		"name": db_slipper.name,
@@ -192,15 +210,14 @@ async def update_existing_slipper(
 	existing = await get_slipper(db, slipper_id=slipper_id)
 	if existing is None:
 		raise HTTPException(status_code=404, detail="Slipper not found")
-	# Build update model from provided fields
 	# Update with provided partial fields
 	db_slipper = await update_slipper(db, existing, slipper)
-	
+
 	# Clear cache after updating slipper
 	from app.core.cache import invalidate_cache_pattern
 	await invalidate_cache_pattern("slippers:")
-	await invalidate_cache_pattern(f"slipper:{slipper_id}:")
-	
+	await invalidate_cache_pattern(f"slipper_id={slipper_id}")
+
 	return {
 		"id": db_slipper.id,
 		"name": db_slipper.name,
@@ -229,9 +246,8 @@ async def delete_existing_slipper(
 		await delete_slipper(db, db_slipper=db_slipper)
 
 		from app.core.cache import invalidate_cache_pattern
-
 		await invalidate_cache_pattern("slippers:")
-		await invalidate_cache_pattern(f"slipper:{slipper_id}:")
+		await invalidate_cache_pattern(f"slipper_id={slipper_id}")
 
 		return {"message": "Slipper deleted successfully"}
 	except HTTPException:
@@ -239,7 +255,6 @@ async def delete_existing_slipper(
 	except Exception as e:
 		logger.error(f"Error deleting slipper {slipper_id}: {e}")
 		raise HTTPException(status_code=500, detail="Error deleting slipper")
-
 
 
 @router.post("/{slipper_id}/upload-images", summary="Загрузить несколько изображений для тапочки")
@@ -250,56 +265,13 @@ async def upload_slipper_images(
 	current_admin: dict = Depends(get_current_admin),
 ):
 	"""Upload one or many images for a slipper. First image becomes main image if not set."""
-	from app.models.slipper import SlipperImage
-	slipper = await get_slipper(db, slipper_id=slipper_id)
-	if not slipper:
-		raise HTTPException(status_code=404, detail="Slipper not found")
-
-	if len(images) > 10:
-		raise HTTPException(status_code=400, detail="Too many images. Maximum 10 images allowed.")
-
-	uploaded_images: List[dict] = []
-	first_image_path: Optional[str] = None
-	upload_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../static/images"))
-	os.makedirs(upload_dir, exist_ok=True)
-
-	for i, image in enumerate(images):
-		ext = os.path.splitext(image.filename)[1]
-		if ext.lower() not in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
-			raise HTTPException(status_code=400, detail=f"Invalid image format for file {image.filename}")
-
-		filename = f"{uuid4().hex}{ext}"
-		file_path = os.path.join(upload_dir, filename)
-		with open(file_path, "wb") as f:
-			f.write(await image.read())
-		relative_path = f"/static/images/{filename}"
-
-		slipper_image = SlipperImage(
-			slipper_id=slipper_id,
-			image_path=relative_path,
-			order_index=i,
-		)
-		db.add(slipper_image)
-
-		if first_image_path is None:
-			first_image_path = relative_path
-
-		uploaded_images.append(
-			{
-				"image_path": relative_path,
-				"order_index": i,
-			}
-		)
-
-	if (not slipper.image) and first_image_path:
-		slipper.image = first_image_path
-		db.add(slipper)
-
-	await db.commit()
+	from app.services.slippers_images import ensure_slipper_exists, upload_images_for_slipper
+	slipper = await ensure_slipper_exists(db, slipper_id)
+	_, uploaded_images = await upload_images_for_slipper(db, slipper, images)
 
 	from app.core.cache import invalidate_cache_pattern
 	await invalidate_cache_pattern("slippers:")
-	await invalidate_cache_pattern(f"slipper:{slipper_id}:")
+	await invalidate_cache_pattern(f"slipper_id={slipper_id}")
 
 	return {
 		"slipper_id": slipper_id,
@@ -310,7 +282,8 @@ async def upload_slipper_images(
 
 @router.get("/{slipper_id}/images", summary="Получить все изображения тапочки")
 async def get_slipper_images(
-	slipper_id: int, db: AsyncSession = Depends(get_db)
+	slipper_id: int,
+	db: AsyncSession = Depends(get_db)
 ):
 	"""Получить все изображения для конкретной тапочки."""
 	from app.models.slipper import SlipperImage
@@ -379,7 +352,7 @@ async def delete_slipper_image(
 
 	from app.core.cache import invalidate_cache_pattern
 	await invalidate_cache_pattern("slippers:")
-	await invalidate_cache_pattern(f"slipper:{slipper_id}:")
+	await invalidate_cache_pattern(f"slipper_id={slipper_id}")
 
 	return {"message": "Image deleted successfully", "deleted_image_id": image_id}
 

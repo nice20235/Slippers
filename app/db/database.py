@@ -5,13 +5,29 @@ from sqlalchemy import event
 from typing import AsyncGenerator
 import os
 import logging
+import asyncio
+from urllib.parse import quote_plus
 from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
+from app.core.config import settings
+from sqlalchemy.engine import make_url
+
+# Optional deps used during bootstrap (PostgreSQL creation / migration)
+try:
+    import psycopg2  # type: ignore
+    import psycopg2.extras  # type: ignore
+except Exception:  # pragma: no cover - optional at runtime
+    psycopg2 = None  # fall back if not installed
+try:
+    import sqlite3  # type: ignore
+except Exception:  # pragma: no cover
+    sqlite3 = None
 
 logger = logging.getLogger(__name__)
 
-# Database URL - use SQLite for development, can be changed to PostgreSQL for production
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./slippers.db")
+# Database URL comes from pydantic settings (.env) with sane default to PostgreSQL
+# Fallback to env var for backward compatibility
+DATABASE_URL = os.getenv("DATABASE_URL", settings.DATABASE_URL)
 
 # Create async engine with optimized settings
 if "sqlite" in DATABASE_URL:
@@ -93,9 +109,169 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             raise
         # Do not call session.close() here: context manager handles it
 
+
+def _make_libpq_dsn(sa_url: str, override_db: str | None = None) -> str:
+    """Convert SQLAlchemy URL (possibly with +asyncpg) to libpq DSN string for psycopg2."""
+    url = make_url(sa_url)
+    # Normalize driver
+    if url.drivername.startswith("postgresql+"):
+        _ = "postgresql"
+    database = override_db or (url.database or "postgres")
+    user = url.username or ""
+    password = url.password or ""
+    host = url.host or "localhost"
+    port = url.port or 5432
+    auth = f"user={quote_plus(user)} " if user else ""
+    pwd = f"password={quote_plus(password)} " if password else ""
+    return f"dbname={quote_plus(database)} {auth}{pwd}host={host} port={port}".strip()
+
+
+def _ensure_database_exists_sync(sa_url: str) -> bool:
+    """Ensure the target PostgreSQL database exists. Returns True if created or False otherwise."""
+    if psycopg2 is None:
+        return False
+    url = make_url(sa_url)
+    if not url.drivername.startswith("postgresql"):
+        return False
+    target_db = url.database
+    if not target_db:
+        return False
+    # Connect to maintenance DB
+    admin_dsn = _make_libpq_dsn(sa_url, override_db="postgres")
+    created = False
+    try:
+        with psycopg2.connect(admin_dsn) as conn:  # type: ignore
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM pg_database WHERE datname=%s", (target_db,))
+                exists = cur.fetchone() is not None
+                if not exists:
+                    owner = url.username
+                    if owner:
+                        cur.execute(f"CREATE DATABASE \"{target_db}\" OWNER \"{owner}\" ENCODING 'UTF8'")
+                    else:
+                        cur.execute(f"CREATE DATABASE \"{target_db}\" ENCODING 'UTF8'")
+                    created = True
+    except Exception as e:  # pragma: no cover
+        logger.warning("Auto-create DB failed or not permitted: %s", e)
+    return created
+
+
+def _is_postgres_db_empty_sync(sa_url: str) -> bool:
+    """Return True if the application tables in the PostgreSQL DB contain no rows.
+
+    Strategy: after SQLAlchemy create_all, core tables will exist. We check a set of key tables.
+    Consider DB 'empty' if none of the tables contain any rows.
+    """
+    if psycopg2 is None:
+        # If psycopg2 missing, we conservatively assume not empty to avoid unintended migration
+        return False
+    url = make_url(sa_url)
+    if not url.drivername.startswith("postgresql"):
+        return False
+    dsn = _make_libpq_dsn(sa_url)
+    tables_to_check = [
+        "users",
+        "categories",
+        "slippers",
+        "slipper_images",
+        "carts",
+        "cart_items",
+        "orders",
+        "order_items",
+        "payments",
+    ]
+    try:
+        with psycopg2.connect(dsn) as conn:  # type: ignore
+            with conn.cursor() as cur:
+                any_rows = False
+                for t in tables_to_check:
+                    cur.execute(
+                        """
+                        SELECT EXISTS (
+                          SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=%s
+                        )
+                        """,
+                        (t,)
+                    )
+                    exists = cur.fetchone()[0]
+                    if not exists:
+                        continue
+                    cur.execute(f"SELECT EXISTS (SELECT 1 FROM \"{t}\" LIMIT 1);")
+                    has = cur.fetchone()[0]
+                    if has:
+                        any_rows = True
+                        break
+                return not any_rows
+    except Exception as e:  # pragma: no cover
+        logger.warning("Failed to assess DB emptiness: %s", e)
+        return False
+
+
+def _migrate_sqlite_to_postgres_sync(sqlite_path: str, sa_url: str) -> None:
+    """Migrate all user tables from a local SQLite file into the current PostgreSQL database.
+
+    Uses the generic per-table copy from scripts.migrate_data.migrate_table and logs progress.
+    Assumes SQLAlchemy has already created the target schema.
+    """
+    if psycopg2 is None or sqlite3 is None:
+        logger.warning("Migration skipped: drivers not available (psycopg2 or sqlite3 missing)")
+        return
+    if not os.path.exists(sqlite_path):
+        logger.warning("Migration skipped: SQLite file not found at %s", sqlite_path)
+        return
+    dsn = _make_libpq_dsn(sa_url)
+    try:
+        import scripts.migrate_data as md  # type: ignore
+    except Exception as e:  # pragma: no cover
+        logger.warning("Migration module not found/failed to import: %s", e)
+        return
+
+    # Determine table list and apply priority order to satisfy FKs
+    priority = [
+        "categories",
+        "users",
+        "slippers",
+        "slipper_images",
+        "carts",
+        "orders",
+        "payments",
+        "cart_items",
+        "order_items",
+    ]
+    try:
+        with sqlite3.connect(sqlite_path) as sconn:  # type: ignore
+            sconn.row_factory = sqlite3.Row  # type: ignore
+            scur = sconn.cursor()
+            scur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
+            all_tables = [r[0] for r in scur.fetchall()]
+            ordered = [t for t in priority if t in all_tables]
+            rest = [t for t in all_tables if t not in ordered]
+            tables = ordered + sorted(rest)
+            logger.info("Starting SQLite -> PostgreSQL migration: %d tables", len(tables))
+            with psycopg2.connect(dsn) as pg:  # type: ignore
+                for t in tables:
+                    try:
+                        logger.info("Migrating table %s ...", t)
+                        md.migrate_table(sconn, pg, t, batch_size=1000)
+                        logger.info("Table %s migrated", t)
+                    except Exception as e:
+                        logger.exception("Failed migrating table %s: %s", t, e)
+                        raise
+            logger.info("SQLite -> PostgreSQL migration completed successfully")
+    except Exception as e:  # pragma: no cover
+        logger.warning("Migration aborted due to error: %s", e)
+
 # Initialize database tables
 async def init_db():
     """Initialize database tables"""
+    # If target is PostgreSQL, attempt to create the database if missing (non-fatal on failure)
+    if engine.sync_engine.dialect.name == "postgresql":
+        try:
+            await asyncio.to_thread(_ensure_database_exists_sync, DATABASE_URL)
+        except Exception as e:  # pragma: no cover
+            logger.warning("DB auto-create check skipped/failed: %s", e)
+
     async with engine.begin() as conn:
         # Import all models to ensure they're registered
         from app.models.user import User  # noqa: F401
@@ -106,43 +282,54 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         print("✅ Database tables created successfully!")
 
-        # --- Legacy status normalization (idempotent) ---
-    # We simplified OrderStatus to: PENDING, PAID, REFUNDED (uppercase stored values).
-        # Older records may still hold: confirmed, preparing, ready, delivered, cancelled.
-        # Map them as follows:
-        #   confirmed/preparing/ready/delivered -> paid (they indicate post-payment states)
-        #   cancelled -> pending (fallback) if kept, otherwise leave or adjust per business rules.
-        # Any unknown statuses -> pending.
+        # After tables exist, if PostgreSQL DB is empty, run one-time migration from SQLite
+        if engine.sync_engine.dialect.name == "postgresql":
+            try:
+                is_empty = await asyncio.to_thread(_is_postgres_db_empty_sync, DATABASE_URL)
+                if is_empty:
+                    logger.info("PostgreSQL DB is empty: starting one-time migration from SQLite")
+                    sqlite_path = os.path.abspath(os.getenv("SQLITE_PATH", "./slippers.db"))
+                    await asyncio.to_thread(_migrate_sqlite_to_postgres_sync, sqlite_path, DATABASE_URL)
+                else:
+                    logger.info("PostgreSQL DB has data: skipping auto-migration")
+            except Exception as e:  # pragma: no cover
+                logger.warning("Auto-migration step failed/skipped: %s", e)
+
+        # Skip legacy SQLite-specific auto-migrations when not using SQLite
+        if engine.sync_engine.dialect.name != "sqlite":
+            logger.info("Non-SQLite dialect detected (%s): skipping SQLite-specific PRAGMA migrations", engine.sync_engine.dialect.name)
+            return
+
+        # --- Legacy status normalization (idempotent, SQLite) ---
         try:
-            # Normalize to lowercase first (defensive) then map.
-            await conn.exec_driver_sql("""
-                UPDATE orders SET status=UPPER(status);
-            """)
-            await conn.exec_driver_sql("""
-                UPDATE orders SET status='PAID' WHERE status IN ('confirmed','preparing','ready','delivered','paid');
-            """)
-            await conn.exec_driver_sql("""
-                UPDATE orders SET status='PENDING' WHERE status IN ('cancelled','pending');
-            """)
-            await conn.exec_driver_sql("""
-                UPDATE orders SET status='PENDING' WHERE status NOT IN ('PENDING','PAID','REFUNDED');
-            """)
-            logger.info("✅ Order status normalization completed")
+            # Normalize to uppercase first (defensive) then map.
+            await conn.exec_driver_sql(
+                "UPDATE orders SET status=UPPER(status);"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE orders SET status='PAID' WHERE status IN ('confirmed','preparing','ready','delivered','paid');"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE orders SET status='PENDING' WHERE status IN ('cancelled','pending');"
+            )
+            await conn.exec_driver_sql(
+                "UPDATE orders SET status='PENDING' WHERE status NOT IN ('PENDING','PAID','REFUNDED');"
+            )
+            logger.info("✅ Order status normalization completed (SQLite)")
         except Exception as e:
             logger.warning("Order status normalization skipped/failed: %s", e)
 
-        # --- Lightweight migration: add payment_uuid column to orders if missing (idempotent) ---
+        # --- SQLite-only: add columns if missing via PRAGMA table_info ---
         try:
             res = await conn.exec_driver_sql("PRAGMA table_info(orders);")
             cols = [r[1] for r in res.fetchall()]  # r[1] is column name
             if 'payment_uuid' not in cols:
-                logger.info("Adding missing payment_uuid column to orders table (auto-migration)...")
+                logger.info("Adding missing payment_uuid column to orders table (auto-migration, SQLite)...")
                 await conn.exec_driver_sql("ALTER TABLE orders ADD COLUMN payment_uuid VARCHAR(64);")
                 try:
                     await conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_orders_payment_uuid ON orders(payment_uuid);")
                 except Exception:
                     pass
-                # Best-effort backfill from payments table when possible
                 try:
                     await conn.exec_driver_sql(
                         """
@@ -159,9 +346,8 @@ async def init_db():
                     )
                 except Exception as e:
                     logger.warning("Backfill payment_uuid skipped: %s", e)
-                logger.info("payment_uuid column added & backfill attempted")
+                logger.info("payment_uuid column added & backfill attempted (SQLite)")
             else:
-                # Ensure index exists (ignore errors)
                 try:
                     await conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS idx_orders_payment_uuid ON orders(payment_uuid);")
                 except Exception:
@@ -169,12 +355,11 @@ async def init_db():
         except Exception as e:
             logger.warning("Auto-migration for payment_uuid failed/skipped: %s", e)
 
-        # --- Lightweight migration: add idempotency_key column & unique index if missing (idempotent) ---
         try:
             res = await conn.exec_driver_sql("PRAGMA table_info(orders);")
             cols = [r[1] for r in res.fetchall()]
             if 'idempotency_key' not in cols:
-                logger.info("Adding missing idempotency_key column to orders table (auto-migration)...")
+                logger.info("Adding missing idempotency_key column to orders table (auto-migration, SQLite)...")
                 await conn.exec_driver_sql("ALTER TABLE orders ADD COLUMN idempotency_key VARCHAR(64);")
                 try:
                     await conn.exec_driver_sql("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_idempotency_key ON orders(idempotency_key);")
@@ -188,7 +373,7 @@ async def init_db():
         except Exception as e:
             logger.warning("Auto-migration for idempotency_key failed/skipped: %s", e)
 
-        # --- Lightweight migration: enforce unique (order_id, slipper_id) on order_items to avoid duplicates ---
+        # --- Enforce unique constraints and cleanup (SQLite) ---
         try:
             await conn.exec_driver_sql(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_items_order_slipper ON order_items(order_id, slipper_id);"
@@ -196,9 +381,6 @@ async def init_db():
         except Exception as e:
             logger.warning("Creating unique index for order_items failed/skipped: %s", e)
 
-        # --- Cleanup migration: fix any bad placeholder order_id values ---
-        # Earlier versions temporarily set order_id to '0' before updating, which could violate the unique constraint
-        # under concurrency. Normalize such rows to the primary key string, and also fix empty/NULL.
         try:
             await conn.exec_driver_sql(
                 """
@@ -210,11 +392,7 @@ async def init_db():
         except Exception as e:
             logger.warning("Order order_id cleanup skipped/failed: %s", e)
 
-        # --- Data repair: consolidate duplicate order_items per (order_id, slipper_id) and recompute order totals ---
-        # Historical bugs could have created multiple rows for the same slipper in one order,
-        # inflating totals. We normalize by collapsing duplicates into a single row per pair.
         try:
-            # Temp tables: sums per (order_id, slipper_id) and the keeper row id (min id)
             await conn.exec_driver_sql("DROP TABLE IF EXISTS oi_sums;")
             await conn.exec_driver_sql("DROP TABLE IF EXISTS oi_keepers;")
             await conn.exec_driver_sql(
@@ -233,8 +411,6 @@ async def init_db():
                 GROUP BY order_id, slipper_id;
                 """
             )
-
-            # Update keeper rows with consolidated quantities and recomputed totals
             await conn.exec_driver_sql(
                 """
                 UPDATE order_items
@@ -257,50 +433,26 @@ async def init_db():
                 WHERE id IN (SELECT keep_id FROM oi_keepers);
                 """
             )
-
-            # Delete all non-keeper duplicates
             await conn.exec_driver_sql(
                 """
                 DELETE FROM order_items
                 WHERE id NOT IN (SELECT keep_id FROM oi_keepers);
                 """
             )
-
-            # Recompute totals for all orders to reflect consolidated items
             await conn.exec_driver_sql(
-                """
-                UPDATE orders
-                SET total_amount = (
-                    SELECT COALESCE(SUM(oi.total_price), 0)
-                    FROM order_items oi
-                    WHERE oi.order_id = orders.id
-                );
-                """
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_items_order_slipper ON order_items(order_id, slipper_id);"
             )
-
-            # Retry creating the unique index now that duplicates are gone
-            try:
-                await conn.exec_driver_sql(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_items_order_slipper ON order_items(order_id, slipper_id);"
-                )
-            except Exception:
-                pass
-
-            logger.info("✅ Consolidated duplicate order_items and recomputed order totals")
+            logger.info("✅ Consolidated duplicate order_items and recomputed order totals (SQLite)")
         except Exception as e:
             logger.warning("Duplicate order_items consolidation skipped/failed: %s", e)
 
-        # --- Safeguards for cart integrity: enforce single cart per user and consolidate duplicate cart_items ---
         try:
-            # Ensure at most one cart per user (application logic expects 1:1)
             try:
                 await conn.exec_driver_sql(
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_carts_user ON carts(user_id);"
                 )
             except Exception:
                 pass
-
-            # Consolidate duplicate lines by (cart_id, slipper_id)
             await conn.exec_driver_sql("DROP TABLE IF EXISTS ci_sums;")
             await conn.exec_driver_sql("DROP TABLE IF EXISTS ci_keepers;")
             await conn.exec_driver_sql(
@@ -319,7 +471,6 @@ async def init_db():
                 GROUP BY cart_id, slipper_id;
                 """
             )
-            # Update the keeper rows to consolidated quantity
             await conn.exec_driver_sql(
                 """
                 UPDATE cart_items
@@ -330,21 +481,19 @@ async def init_db():
                 WHERE id IN (SELECT keep_id FROM ci_keepers);
                 """
             )
-            # Delete non-keeper duplicates
             await conn.exec_driver_sql(
                 """
                 DELETE FROM cart_items
                 WHERE id NOT IN (SELECT keep_id FROM ci_keepers);
                 """
             )
-            # Enforce unique constraint to prevent future duplicates
             try:
                 await conn.exec_driver_sql(
                     "CREATE UNIQUE INDEX IF NOT EXISTS uq_cart_items_cart_slipper ON cart_items(cart_id, slipper_id);"
                 )
             except Exception:
                 pass
-            logger.info("✅ Consolidated duplicate cart_items and enforced unique constraints")
+            logger.info("✅ Consolidated duplicate cart_items and enforced unique constraints (SQLite)")
         except Exception as e:
             logger.warning("Cart integrity safeguards skipped/failed: %s", e)
 

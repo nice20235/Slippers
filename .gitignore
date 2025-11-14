@@ -197,6 +197,8 @@ logs/
 
 # Uploaded media (keep if not using external storage)
 app/static/images/*.tmp
+app/static/images/*
+!app/static/images/.gitkeep
 
 # Alembic/migrations cache (if added later)
 alembic.ini.bak
@@ -205,3 +207,4 @@ migrations/versions/__pycache__/
 # Editor settings
 .vscode/
 *.code-workspace
+.DS_Store

@@ -1,0 +1,79 @@
+{
+  "cart_items": {
+    "sqlite_count": 1,
+    "sqlite_md5": "ca7545f633827f295cd03f5d9663ee3b",
+    "pg_count": 1,
+    "pg_md5": "ca7545f633827f295cd03f5d9663ee3b",
+    "match": true
+  },
+  "carts": {
+    "sqlite_count": 1,
+    "sqlite_md5": "4ed3e7cbd480c172b6f3620834502d86",
+    "pg_count": 1,
+    "pg_md5": "4ed3e7cbd480c172b6f3620834502d86",
+    "match": true
+  },
+  "categories": {
+    "sqlite_count": 1,
+    "sqlite_md5": "e5ff77c34f8601606e79cf748df58418",
+    "pg_count": 1,
+    "pg_md5": "e5ff77c34f8601606e79cf748df58418",
+    "match": true
+  },
+  "order_items": {
+    "sqlite_count": 11,
+    "sqlite_md5": "4b94b92e1bc1497a3ffbeba2f3bb268f",
+    "pg_count": 11,
+    "pg_md5": "4b94b92e1bc1497a3ffbeba2f3bb268f",
+    "match": true
+  },
+  "orders": {
+    "sqlite_count": 11,
+    "sqlite_md5": "3deb06cfccd5b88504ba95b85f202e57",
+    "pg_count": 11,
+    "pg_md5": "3deb06cfccd5b88504ba95b85f202e57",
+    "match": true
+  },
+  "payments": {
+    "sqlite_count": 18,
+    "sqlite_md5": "b9fd2cb3a0754941b1978365315f61df",
+    "pg_count": 18,
+    "pg_md5": "b9fd2cb3a0754941b1978365315f61df",
+    "match": true
+  },
+  "refund_requests": {
+    "sqlite_count": 0,
+    "sqlite_md5": "d41d8cd98f00b204e9800998ecf8427e",
+    "pg_count": 0,
+    "pg_md5": "d41d8cd98f00b204e9800998ecf8427e",
+    "match": true
+  },
+  "refunds": {
+    "sqlite_count": 2,
+    "sqlite_md5": "32d27132156b9e8d02646f777bcf5c0e",
+    "pg_count": 2,
+    "pg_md5": "32d27132156b9e8d02646f777bcf5c0e",
+    "match": true
+  },
+  "slipper_images": {
+    "sqlite_count": 1,
+    "sqlite_md5": "7af28cb72c3fa2096b74508f6f68c61c",
+    "pg_count": 1,
+    "pg_md5": "7af28cb72c3fa2096b74508f6f68c61c",
+    "match": true
+  },
+  "slippers": {
+    "sqlite_count": 1,
+    "sqlite_md5": "3b1a655149f41addfa91a51255015f00",
+    "pg_count": 1,
+    "pg_md5": "3b1a655149f41addfa91a51255015f00",
+    "match": true
+  },
+  "users": {
+    "sqlite_count": 2,
+    "sqlite_md5": "f340c7bdb3ab2babfb166f6af3bbb25f",
+    "pg_count": 2,
+    "pg_md5": "f340c7bdb3ab2babfb166f6af3bbb25f",
+    "match": true
+  }
+}

@@ -60,7 +60,12 @@ class Slipper(Base):
     )
     
     category: Mapped[Category] = relationship("Category", back_populates="slippers")
-    images: Mapped[list["SlipperImage"]] = relationship("SlipperImage", back_populates="slipper", cascade="all, delete-orphan")
+    images: Mapped[list["SlipperImage"]] = relationship(
+        "SlipperImage",
+        back_populates="slipper",
+        cascade="all, delete-orphan",
+        order_by="SlipperImage.order_index"
+    )
     
     __table_args__ = (
         Index('idx_slippers_name', 'name'),
