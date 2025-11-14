@@ -207,7 +207,7 @@ async def delete_existing_slipper(
 		raise HTTPException(status_code=500, detail="Error deleting slipper")
 
 
-@router.post("/{slipper_id}/upload-images", summary="Загрузить несколько изображений для тапочки")
+@router.post("/{slipper_id}/upload-images/", summary="Загрузить несколько изображений для тапочки")
 async def upload_slipper_images(
 	slipper_id: int,
 	images: List[UploadFile] = File(...),
