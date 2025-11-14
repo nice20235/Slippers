@@ -258,9 +258,54 @@ def _migrate_sqlite_to_postgres_sync(sqlite_path: str, sa_url: str) -> None:
                     except Exception as e:
                         logger.exception("Failed migrating table %s: %s", t, e)
                         raise
+                # After all data migrated, reset sequences to prevent duplicate key errors
+                logger.info("Resetting PostgreSQL sequences...")
+                _reset_postgres_sequences_sync(pg)
             logger.info("SQLite -> PostgreSQL migration completed successfully")
     except Exception as e:  # pragma: no cover
         logger.warning("Migration aborted due to error: %s", e)
+
+
+def _reset_postgres_sequences_sync(pg_conn) -> None:
+    """Reset all PostgreSQL sequences to match the max ID in their tables.
+    
+    This prevents 'duplicate key' errors after migrating data from SQLite.
+    """
+    try:
+        with pg_conn.cursor() as cur:
+            # Find all sequences and their associated tables
+            cur.execute("""
+                SELECT 
+                    t.table_name,
+                    c.column_name,
+                    pg_get_serial_sequence(quote_ident(t.table_name), quote_ident(c.column_name)) as sequence_name
+                FROM information_schema.tables t
+                JOIN information_schema.columns c 
+                    ON t.table_name = c.table_name
+                WHERE t.table_schema = 'public'
+                    AND c.column_default LIKE 'nextval%'
+                    AND t.table_type = 'BASE TABLE'
+            """)
+            
+            sequences = cur.fetchall()
+            for table_name, column_name, sequence_name in sequences:
+                if sequence_name:
+                    try:
+                        # Get max ID from table
+                        cur.execute(f'SELECT MAX("{column_name}") FROM "{table_name}"')
+                        max_id = cur.fetchone()[0]
+                        
+                        if max_id is not None:
+                            # Set sequence to max_id + 1
+                            cur.execute(f"SELECT setval('{sequence_name}', %s, true)", (max_id,))
+                            logger.info(f"Reset sequence {sequence_name} to {max_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to reset sequence {sequence_name}: {e}")
+            
+            pg_conn.commit()
+            logger.info("All sequences reset successfully")
+    except Exception as e:
+        logger.warning(f"Sequence reset failed: {e}")
 
 # Initialize database tables
 async def init_db():

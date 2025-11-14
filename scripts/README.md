@@ -30,16 +30,35 @@ This writes `scripts/analysis/<timestamp>_sqlite_analysis.json` and a best-effor
 python3 scripts/migrate_data.py --sqlite ./slippers.db --pg "dbname=mydb user=me password=pass host=127.0.0.1 port=5432"
 ```
 
-4. Verify integrity:
+4. **CRITICAL**: Reset sequences to prevent duplicate key errors:
+
+```bash
+python3 scripts/reset_sequences.py --pg "dbname=mydb user=me password=pass host=127.0.0.1 port=5432"
+```
+
+Without this step, inserts will fail with errors like:
+```
+duplicate key value violates unique constraint "slippers_pkey"
+DETAIL: Key (id)=(8) already exists.
+```
+
+5. Verify integrity:
 
 ```bash
 python3 scripts/verify_integrity.py --sqlite ./slippers.db --pg "dbname=mydb user=me password=pass host=127.0.0.1 port=5432"
 ```
 
+## Why Reset Sequences?
+
+SQLite uses implicit auto-increment without explicit sequences. When data is copied to PostgreSQL, the table rows get their IDs but PostgreSQL sequences (e.g., `slippers_id_seq`) remain at their default starting value (1). 
+
+The next insert tries to use the sequence's current value, which conflicts with existing data. The `reset_sequences.py` script sets each sequence to `MAX(id)` from its table.
+
 Notes and recommended flow
 - Put your app into maintenance/read-only mode while migrating to avoid drift.
 - For an async FastAPI app the recommended DB driver for PostgreSQL is `asyncpg` with SQLAlchemy `async` support. To keep changes minimal, update the `DATABASE_URL` environment variable to something like `postgresql+asyncpg://user:pass@localhost/dbname` and install `asyncpg`.
 - If you prefer to use `psycopg2` everywhere instead, be aware it's synchronous and will require code changes if your app uses async DB sessions.
+- The auto-migration in `app/db/init_db.py` now includes sequence reset, but manual migrations still require running the script.
 
 Logs
 - Logs are written to `scripts/logs/`.
