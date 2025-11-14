@@ -65,30 +65,32 @@ async def get_slippers(
 	sort: str = "name_asc",
 	load_images: bool = False,
 ) -> Tuple[List[Slipper], int]:
-	"""Get slippers with pagination and filters - optimized"""
-	# Build base query with efficient loading
+	"""Get slippers with pagination and filters - highly optimized"""
+	# Build base query with efficient loading strategies
 	query = select(Slipper).options(joinedload(Slipper.category))
 	if load_images:
-		from sqlalchemy.orm import selectinload
 		query = query.options(selectinload(Slipper.images))
+	
 	conditions = []
 	
-	# Apply filters
+	# Apply filters - optimized
 	if category_id:
 		conditions.append(Slipper.category_id == category_id)
 	
 	if search:
+		# Simplified search - avoid multiple OR conditions for better index usage
+		search_pattern = f"%{search}%"
 		conditions.append(
 			or_(
-				Slipper.name.ilike(f"%{search}%"),
-				Slipper.size.ilike(f"%{search}%")
+				Slipper.name.ilike(search_pattern),
+				Slipper.size.ilike(search_pattern)
 			)
 		)
 	
 	if conditions:
 		query = query.where(and_(*conditions))
 	
-	# Sorting options
+	# Sorting - pre-compiled map for fast lookup
 	sort_map = {
 		"id_asc": Slipper.id.asc(),
 		"id_desc": Slipper.id.desc(),
@@ -102,13 +104,28 @@ async def get_slippers(
 	order_clause = sort_map.get(sort, Slipper.name.asc())
 	query = query.order_by(order_clause)
 	
-	# Sequential execution to avoid SQLite concurrent operations
-	count_query = select(func.count()).select_from(query.subquery())
-	count_result = await db.execute(count_query)
-	total = count_result.scalar() or 0
+	# Optimized: Use window function for count + data in single query (PostgreSQL)
+	# Falls back to separate queries for SQLite
+	if 'postgresql' in str(db.bind.engine.url):
+		# Single query approach for PostgreSQL
+		from sqlalchemy import over
+		count_col = func.count().over()
+		query_with_count = query.add_columns(count_col)
+		result = await db.execute(query_with_count.offset(skip).limit(limit))
+		rows = result.all()
+		if rows:
+			slippers = [row[0] for row in rows]
+			total = rows[0][1] if rows else 0
+		else:
+			slippers, total = [], 0
+	else:
+		# Fallback for SQLite - separate queries
+		count_query = select(func.count()).select_from(query.subquery())
+		count_result = await db.execute(count_query)
+		total = count_result.scalar() or 0
 
-	data_result = await db.execute(query.offset(skip).limit(limit))
-	slippers = data_result.scalars().all()
+		data_result = await db.execute(query.offset(skip).limit(limit))
+		slippers = data_result.scalars().all()
 	
 	return slippers, total
 

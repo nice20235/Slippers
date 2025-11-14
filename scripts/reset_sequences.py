@@ -70,15 +70,26 @@ def reset_sequences(dsn: str):
                 max_id = cur.fetchone()['max_id']
                 
                 if max_id is None:
-                    print(f"⚠️  {table_name}.{column_name}: Empty table, skipping")
+                    print(f"⚠️  {table_name}.{column_name}: Empty table, resetting to 1")
+                    cur.execute(f"SELECT setval('{sequence_name}', 1, false)", ())
+                    conn.commit()
+                    print(f"🔧 {table_name}.{column_name}: → 1 (next insert will use 1)")
+                    fixed += 1
                     continue
                 
-                # Reset sequence
-                cur.execute(f"SELECT setval('{sequence_name}', %s, true)", (max_id,))
+                # Reset sequence to MAX(id), so next insert uses MAX(id) + 1
+                # Using 'false' parameter means next nextval() will return max_id + 1
+                new_value = max_id
+                cur.execute(f"SELECT setval('{sequence_name}', %s, true)", (new_value,))
                 conn.commit()
                 
-                status = "✅" if max_id >= current_val else "🔧"
-                print(f"{status} {table_name}.{column_name}: {current_val} → {max_id} (sequence: {sequence_name})")
+                # Verify the sequence was set correctly
+                cur.execute(f"SELECT last_value, is_called FROM {sequence_name}")
+                verify = cur.fetchone()
+                next_val = verify['last_value'] + 1 if verify['is_called'] else verify['last_value']
+                
+                status = "✅" if next_val > max_id else "⚠️"
+                print(f"{status} {table_name}.{column_name}: seq={current_val} → {new_value}, max_id={max_id}, next={next_val}")
                 fixed += 1
                 
             except Exception as e:

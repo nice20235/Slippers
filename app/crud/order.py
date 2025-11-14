@@ -34,8 +34,8 @@ async def get_orders(
     status: Optional[OrderStatus] = None,
     load_relationships: bool = True
 ) -> Tuple[List[Order], int]:
-    """Get orders with pagination and filters - optimized"""
-    # Build base query
+    """Get orders with pagination and filters - highly optimized"""
+    # Build base query with efficient eager loading
     query = select(Order)
     conditions = []
     
@@ -48,24 +48,36 @@ async def get_orders(
     if conditions:
         query = query.where(and_(*conditions))
     
-    # Add relationships if needed
+    # Add relationships with optimal loading strategy
     if load_relationships:
         query = query.options(
-            joinedload(Order.user),
-            selectinload(Order.items).selectinload(OrderItem.slipper)
+            joinedload(Order.user),  # One-to-one, use joined load
+            selectinload(Order.items).selectinload(OrderItem.slipper)  # One-to-many, use selectinload
         )
     
-    # Order by created_at for consistent results
+    # Order by created_at desc for latest-first
     query = query.order_by(Order.created_at.desc())
     
-    # Sequential execution to avoid SQLite concurrent operations
-    count_query = select(func.count()).select_from(query.subquery())
-    count_result = await db.execute(count_query)
-    total = count_result.scalar() or 0
+    # Optimized: single query for PostgreSQL with window function
+    if 'postgresql' in str(db.bind.engine.url):
+        from sqlalchemy import over
+        count_col = func.count().over()
+        query_with_count = query.add_columns(count_col)
+        result = await db.execute(query_with_count.offset(skip).limit(limit))
+        rows = result.unique().all()  # unique() handles duplicate rows from joins
+        if rows:
+            orders = [row[0] for row in rows]
+            total = rows[0][1] if rows else 0
+        else:
+            orders, total = [], 0
+    else:
+        # Fallback for SQLite
+        count_query = select(func.count()).select_from(query.subquery())
+        count_result = await db.execute(count_query)
+        total = count_result.scalar() or 0
 
-    data_result = await db.execute(query.offset(skip).limit(limit))
-    # Ensure uniqueness when eager loaders are involved
-    orders = data_result.unique().scalars().all()
+        data_result = await db.execute(query.offset(skip).limit(limit))
+        orders = data_result.unique().scalars().all()
     
     return orders, total
 

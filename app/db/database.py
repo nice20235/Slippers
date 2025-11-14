@@ -57,21 +57,28 @@ if "sqlite" in DATABASE_URL:
             # Best-effort; continue even if PRAGMAs can't be set
             pass
 else:
-    # PostgreSQL/MySQL optimizations
+    # PostgreSQL/MySQL optimizations - tuned for high performance
     engine = create_async_engine(
         DATABASE_URL,
         echo=False,
         poolclass=QueuePool,
-        pool_size=20,
-        max_overflow=30,
+        pool_size=50,           # Increased from 20 for higher concurrency
+        max_overflow=100,       # Increased from 30 for burst traffic
         pool_pre_ping=True,
-        pool_recycle=3600,
-        pool_timeout=30,
+        pool_recycle=1800,      # Recycle connections every 30min (was 1hr)
+        pool_timeout=10,        # Reduced timeout for faster failure detection
         connect_args={
-            "command_timeout": 60,
+            "command_timeout": 30,  # Reduced from 60s
             "server_settings": {
-                "jit": "off",
-            }
+                "jit": "off",                    # JIT disabled for predictable performance
+                "statement_timeout": "30000",    # 30s query timeout
+                "idle_in_transaction_session_timeout": "60000",  # Kill idle txns after 1min
+            },
+            "prepared_statement_cache_size": 500,  # Cache prepared statements
+        },
+        # Enable query result caching and execution options
+        execution_options={
+            "compiled_cache": {},  # Enable SQLAlchemy query compilation cache
         }
     )
 
@@ -79,9 +86,9 @@ else:
 AsyncSessionLocal = async_sessionmaker(
     engine,
     class_=AsyncSession,
-    expire_on_commit=False,  # Better for async operations
+    expire_on_commit=False,  # Better for async operations - prevents lazy loads after commit
     autocommit=False,
-    autoflush=False,  # Manual control over when to flush
+    autoflush=False,  # Manual control over when to flush - reduces round trips
 )
 
 # Base class for all models

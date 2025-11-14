@@ -174,10 +174,10 @@ app.add_middleware(SecurityHeadersMiddleware)
 # GZip compression for responses > 1KB
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Simple global rate limiting middleware (IP-based) - keeping existing implementation
+# Simple global rate limiting middleware (IP-based) - optimized
 from collections import defaultdict, deque
 import time
-_req_log = defaultdict(deque)
+_req_log = defaultdict(lambda: deque(maxlen=100))  # Use maxlen for automatic cleanup
 _exclude = {p.strip() for p in settings.RATE_LIMIT_EXCLUDE_PATHS.split(',') if p.strip()}
 
 @app.middleware("http")
@@ -190,13 +190,13 @@ async def rate_limit_middleware(request: Request, call_next):
         # will set the echo origin. Here we just return early to avoid other middlewares blocking it.
         return response
     path = request.url.path
-    if path in _exclude:
+    if path in _exclude or path.startswith('/static'):  # Fast path for excluded routes
         return await call_next(request)
 
-    # Identify client IP
+    # Identify client IP - optimized
     if settings.TRUST_PROXY:
         fwd = request.headers.get("x-forwarded-for")
-        client_ip = fwd.split(',')[0].strip() if fwd else request.client.host
+        client_ip = fwd.split(',', 1)[0].strip() if fwd else request.client.host
     else:
         client_ip = request.client.host
 
@@ -204,26 +204,33 @@ async def rate_limit_middleware(request: Request, call_next):
     window = settings.RATE_LIMIT_WINDOW_SEC
     limit = settings.RATE_LIMIT_REQUESTS
     dq = _req_log[client_ip]
+    
+    # Clean old entries - optimized with maxlen
     while dq and now - dq[0] > window:
         dq.popleft()
+    
     if len(dq) >= limit:
-        reset_in = int(max(0, window - (now - dq[0]))) if dq else window
+        reset_in = int(window - (now - dq[0])) if dq else window
         return JSONResponse(
             status_code=429,
             content={"detail": "Too many requests"},
             headers={
                 "X-RateLimit-Limit": str(limit),
                 "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(reset_in)
+                "X-RateLimit-Reset": str(reset_in),
+                "Retry-After": str(reset_in)
             }
         )
     dq.append(now)
-    remaining = max(0, limit - len(dq))
     response = await call_next(request)
+    
+    # Add rate limit headers - avoid recalculation
+    remaining = limit - len(dq)
     response.headers["X-RateLimit-Limit"] = str(limit)
     response.headers["X-RateLimit-Remaining"] = str(remaining)
-    reset_in = int(max(0, window - (now - dq[0]))) if dq else window
-    response.headers["X-RateLimit-Reset"] = str(reset_in)
+    if dq:
+        reset_in = int(window - (now - dq[0]))
+        response.headers["X-RateLimit-Reset"] = str(reset_in)
     return response
 
 # Register CORS middleware LAST so it becomes the outermost middleware and reliably
@@ -269,7 +276,7 @@ async def root():
         "status": "operational"
     }
 
-# Slow request logging middleware (diagnostics)
+# Slow request logging middleware (diagnostics) - optimized
 SLOW_REQUEST_THRESHOLD_SEC = 1.0  # adjust as needed
 
 @app.middleware("http")
@@ -277,10 +284,14 @@ async def slow_request_logger(request: Request, call_next):
     start = time.time()
     response = await call_next(request)
     duration = time.time() - start
-    if duration > SLOW_REQUEST_THRESHOLD_SEC:
+    
+    # Only log if slow and not a static file
+    if duration > SLOW_REQUEST_THRESHOLD_SEC and not request.url.path.startswith('/static'):
         logger.warning("Slow request path=%s duration=%.3fs", request.url.path, duration)
+    
+    # Reuse existing variables, avoid formatting overhead for fast requests
     response.headers["X-Process-Time"] = f"{duration:.3f}s"
-    response.headers["X-Uptime"] = f"{int(time.time() - START_TIME)}"
+    response.headers["X-Uptime"] = str(int(time.time() - START_TIME))
     return response
 
 # Health check endpoint  
