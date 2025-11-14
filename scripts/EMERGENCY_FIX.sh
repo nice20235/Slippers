@@ -14,15 +14,22 @@ fi
 if [ -n "$DATABASE_URL" ]; then
     echo "✅ Found DATABASE_URL"
     
-    # Extract components from postgresql://user:pass@host/dbname
+    # Extract components from postgresql://user:pass@host:port/dbname
     DB_USER=$(echo $DATABASE_URL | sed -n 's/.*:\/\/\([^:]*\):.*/\1/p')
     DB_PASS=$(echo $DATABASE_URL | sed -n 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/p')
-    DB_HOST=$(echo $DATABASE_URL | sed -n 's/.*@\([^\/]*\)\/.*/\1/p')
+    DB_HOST=$(echo $DATABASE_URL | sed -n 's/.*@\([^:\/]*\).*/\1/p')
+    DB_PORT=$(echo $DATABASE_URL | sed -n 's/.*@[^:]*:\([0-9]*\).*/\1/p')
     DB_NAME=$(echo $DATABASE_URL | sed -n 's/.*\/\([^?]*\).*/\1/p')
+    
+    # Default port if not specified
+    if [ -z "$DB_PORT" ]; then
+        DB_PORT="5432"
+    fi
     
     echo "📊 Database: $DB_NAME"
     echo "👤 User: $DB_USER"
     echo "🖥️  Host: $DB_HOST"
+    echo "🔌 Port: $DB_PORT"
     echo ""
 else
     echo "❌ DATABASE_URL not found in .env"
@@ -36,7 +43,7 @@ echo "🔧 Resetting sequences..."
 echo ""
 
 # Run the fix
-psql -h "$DB_HOST" -U "$DB_USER" -d "$DB_NAME" <<'EOSQL'
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" <<'EOSQL'
 DO $$ 
 DECLARE 
     r RECORD; 
