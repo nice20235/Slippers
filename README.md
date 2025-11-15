@@ -19,7 +19,7 @@ FastAPI-based slippers ordering & payment system with user authentication, catal
 
 - **Caching Layer**: In‑memory TTL cache with pattern invalidation
 - **Security & Performance**: Rate limiting, security headers, gzip, performance timing headers
-- **Async Stack**: FastAPI + SQLAlchemy 2.0 async + SQLite (dev) / PostgreSQL (recommended)
+- **Async Stack**: FastAPI + SQLAlchemy 2.0 async + PostgreSQL with asyncpg driver
 
 ## Setup
 
@@ -31,9 +31,7 @@ FastAPI-based slippers ordering & payment system with user authentication, catal
 2. **Environment Configuration** – create a `.env` file in project root:
   ```env
   # --- Core ---
-  DATABASE_URL=sqlite+aiosqlite:///./slippers.db
-  # For production switch to PostgreSQL:
-  # DATABASE_URL=postgresql+asyncpg://user:password@localhost/slippers
+  DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/slippers
   SECRET_KEY=change_me_strong_secret
   ALGORITHM=HS256
   ACCESS_TOKEN_EXPIRE_MINUTES=15
@@ -64,12 +62,17 @@ FastAPI-based slippers ordering & payment system with user authentication, catal
   ```
 
 3. **Database Setup**
-  - SQLite: file auto‑created.
-  - PostgreSQL: create DB manually; optionally apply Alembic migrations (future improvement).
+  - PostgreSQL: Create database manually or let the app auto-create it on first run
+  - Connection pool optimized for high performance (50 base + 100 overflow connections)
 
 4. **Run the application**
   ```bash
   python -m uvicorn app.main:app --reload
+  ```
+  
+  For production with performance optimizations:
+  ```bash
+  ./run_optimized.sh
   ```
 
 5. **Initialize sample data (optional)**
@@ -189,19 +192,46 @@ curl -X POST "http://localhost:8000/payments/octo/refund" \
 
 ## Production Notes
 
-- Prefer PostgreSQL over SQLite (concurrency & reliability)
+- PostgreSQL optimized with connection pooling (50 base + 100 overflow connections)
+- Performance features: uvloop event loop, httptools HTTP parser, prepared statement cache
 - Set `DEBUG=False` and tighten `ALLOWED_ORIGINS`
-- Use a proper process manager (systemd, supervisor) + reverse proxy (nginx)
+- Use systemd service (see `slippers-optimized.service`) + reverse proxy (nginx)
 - Configure HTTPS for secure cookies (`COOKIE_SECURE=True`)
 - Keep `OCTO_NOTIFY_URL` publicly reachable and return 200 quickly
 - Add webhook signature validation (TODO enhancement)
-- Consider adding Alembic migrations before schema changes
+- Database sequence fix scripts available in `scripts/` directory
+
+## Performance Optimizations
+
+- **Connection Pooling**: QueuePool with 50 connections + 100 overflow
+- **Query Optimization**: Window functions for single-query pagination
+- **Caching**: In-memory TTL cache with pattern invalidation
+- **Event Loop**: uvloop (2-4x faster than default asyncio)
+- **HTTP Parser**: httptools for faster request parsing
+- **Middleware**: Optimized rate limiting with O(1) deque operations
+- **Deployment**: Multi-worker setup with 4 uvicorn workers
+
+Run with optimizations:
+```bash
+./run_optimized.sh
+```
+
+## Troubleshooting
+
+### Duplicate Key Errors
+If you see "duplicate key value violates unique constraint" errors, run the sequence fix:
+```bash
+cd scripts
+./EMERGENCY_FIX.sh
+```
+
+See `scripts/FIX_NOW.md` or `scripts/PRODUCTION_FIX.md` for detailed instructions.
 
 ## Future Improvements
 
 - Webhook signature / HMAC verification
 - Idempotency key handling for notify events
-- Postgres migration & indexes review
+- Indexes review for query optimization
 - Background task for clearing stale PENDING payments
 - Redis cache backend option
 

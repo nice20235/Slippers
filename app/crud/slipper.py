@@ -105,27 +105,16 @@ async def get_slippers(
 	query = query.order_by(order_clause)
 	
 	# Optimized: Use window function for count + data in single query (PostgreSQL)
-	# Falls back to separate queries for SQLite
-	if 'postgresql' in str(db.bind.engine.url):
-		# Single query approach for PostgreSQL
-		from sqlalchemy import over
-		count_col = func.count().over()
-		query_with_count = query.add_columns(count_col)
-		result = await db.execute(query_with_count.offset(skip).limit(limit))
-		rows = result.all()
-		if rows:
-			slippers = [row[0] for row in rows]
-			total = rows[0][1] if rows else 0
-		else:
-			slippers, total = [], 0
+	from sqlalchemy import over
+	count_col = func.count().over()
+	query_with_count = query.add_columns(count_col)
+	result = await db.execute(query_with_count.offset(skip).limit(limit))
+	rows = result.all()
+	if rows:
+		slippers = [row[0] for row in rows]
+		total = rows[0][1] if rows else 0
 	else:
-		# Fallback for SQLite - separate queries
-		count_query = select(func.count()).select_from(query.subquery())
-		count_result = await db.execute(count_query)
-		total = count_result.scalar() or 0
-
-		data_result = await db.execute(query.offset(skip).limit(limit))
-		slippers = data_result.scalars().all()
+		slippers, total = [], 0
 	
 	return slippers, total
 

@@ -74,7 +74,7 @@ async def get_users(
     # Order by created_at for consistent results
     query = query.order_by(User.created_at.desc())
     
-    # Sequential execution to avoid SQLite concurrent operations
+    # Get total count and paginated data
     count_query = select(func.count()).select_from(query.subquery())
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0

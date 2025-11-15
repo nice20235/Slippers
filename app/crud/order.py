@@ -58,26 +58,17 @@ async def get_orders(
     # Order by created_at desc for latest-first
     query = query.order_by(Order.created_at.desc())
     
-    # Optimized: single query for PostgreSQL with window function
-    if 'postgresql' in str(db.bind.engine.url):
-        from sqlalchemy import over
-        count_col = func.count().over()
-        query_with_count = query.add_columns(count_col)
-        result = await db.execute(query_with_count.offset(skip).limit(limit))
-        rows = result.unique().all()  # unique() handles duplicate rows from joins
-        if rows:
-            orders = [row[0] for row in rows]
-            total = rows[0][1] if rows else 0
-        else:
-            orders, total = [], 0
+    # Optimized: single query with window function (PostgreSQL)
+    from sqlalchemy import over
+    count_col = func.count().over()
+    query_with_count = query.add_columns(count_col)
+    result = await db.execute(query_with_count.offset(skip).limit(limit))
+    rows = result.unique().all()  # unique() handles duplicate rows from joins
+    if rows:
+        orders = [row[0] for row in rows]
+        total = rows[0][1] if rows else 0
     else:
-        # Fallback for SQLite
-        count_query = select(func.count()).select_from(query.subquery())
-        count_result = await db.execute(count_query)
-        total = count_result.scalar() or 0
-
-        data_result = await db.execute(query.offset(skip).limit(limit))
-        orders = data_result.unique().scalars().all()
+        orders, total = [], 0
     
     return orders, total
 
