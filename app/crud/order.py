@@ -276,7 +276,8 @@ async def create_order(
     temp_placeholder = None
     if not provided_order_id:
         # Use a unique temp value to satisfy unique constraint at INSERT time
-        temp_placeholder = f"tmp-{uuid.uuid4().hex}"
+        # Limit to 32 chars: use first 29 chars of UUID hex (still highly unique)
+        temp_placeholder = f"tmp{uuid.uuid4().hex[:29]}"
     db_order = Order(
         order_id=provided_order_id if provided_order_id else temp_placeholder,
         user_id=order.user_id,
