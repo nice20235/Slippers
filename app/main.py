@@ -19,6 +19,7 @@ from app.api.endpoints import users, slippers, orders, categories
 from app.api.endpoints import cart as cart_router
 from app.api.endpoints import octo as octo_payments
 from app.auth.routes import auth_router
+from app.auth.dependencies import get_current_admin
 from app.schemas.responses import HealthCheckResponse, ErrorResponse
 
 load_dotenv()
@@ -305,6 +306,25 @@ async def health_check():
         database=True,
         cache=True
     )
+
+
+# Database pool status endpoint (admin only)
+@app.get("/admin/db-pool-status", tags=["System"], dependencies=[Depends(get_current_admin)])
+async def get_db_pool_status():
+    """Get database connection pool statistics - Admin only"""
+    from app.db.database import engine
+    
+    pool = engine.pool
+    return {
+        "pool_size": pool.size(),
+        "checked_in_connections": pool.checkedin(),
+        "checked_out_connections": pool.checkedout(),
+        "overflow": pool.overflow(),
+        "total_connections": pool.checkedin() + pool.checkedout(),
+        "max_overflow": engine.pool._max_overflow,
+        "pool_timeout": engine.pool._timeout,
+        "status": "healthy" if pool.checkedin() > 0 else "warning"
+    }
 
 if __name__ == "__main__":
     uvicorn.run(
