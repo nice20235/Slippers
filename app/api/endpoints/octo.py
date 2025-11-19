@@ -142,7 +142,13 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Order total is zero; cannot create payment")
     # Mock external OCTO call via existing service wrapper; fallback fabricate
-    res = await createPayment(amount, f"Order #{order.order_id}")
+    # Pass user info for OCTO payment form pre-fill
+    res = await createPayment(
+        amount, 
+        f"Order #{order.order_id}",
+        user_phone=user.phone_number,
+        user_name=f"{user.name} {user.surname}".strip()
+    )
     if not res.success or not res.octo_pay_url:
         raise HTTPException(status_code=400, detail=res.errMessage or "OCTO error")
     # Persist to payments table (internal tracking) & attach payment_uuid to order
