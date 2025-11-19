@@ -142,22 +142,7 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Order total is zero; cannot create payment")
     # Mock external OCTO call via existing service wrapper; fallback fabricate
-    # Pass user info for OCTO payment form pre-fill
-    # Ensure we always pass valid non-empty values to avoid OCTO null field errors
-    user_phone = (user.phone_number or "").strip()
-    user_full_name = f"{user.name or ''} {user.surname or ''}".strip()
-    
-    # Only pass user data if we have both phone and name
-    if not user_phone or not user_full_name:
-        logger.warning("User %s missing phone or name for payment, skipping user_data", user.id)
-        res = await createPayment(amount, f"Order #{order.order_id}")
-    else:
-        res = await createPayment(
-            amount, 
-            f"Order #{order.order_id}",
-            user_phone=user_phone,
-            user_name=user_full_name
-        )
+    res = await createPayment(amount, f"Order #{order.order_id}")
     if not res.success or not res.octo_pay_url:
         raise HTTPException(status_code=400, detail=res.errMessage or "OCTO error")
     # Persist to payments table (internal tracking) & attach payment_uuid to order

@@ -54,18 +54,13 @@ def _extract_payment_uuid(data: Dict[str, Any]) -> Optional[str]:
             return c
     return None
 
-async def createPayment(
-    total_sum: int, 
-    description: str,
-    user_phone: Optional[str] = None,
-    user_name: Optional[str] = None
-) -> OctoPrepareResponse:
+async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse:
     """
     Create payment via OCTO prepare_payment (one-stage, auto_capture).
 
     - currency: UZS
     - payment_methods: uzcard, humo, bank_card
-    - Includes user_data with phone/email for OCTO payment form
+    - Do NOT send user_data
     """
     if total_sum <= 0:
         return OctoPrepareResponse(success=False, errMessage="total_sum must be positive", raw={})
@@ -93,53 +88,26 @@ async def createPayment(
         "auto_capture": bool(settings.OCTO_AUTO_CAPTURE),
         "init_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "test": bool(settings.OCTO_TEST),
+        # user_data omitted intentionally
         "total_sum": float(total_sum),
         "currency": settings.OCTO_CURRENCY,
         "description": description,
-        # Intentionally omit payment_methods so OCTO shows all enabled methods for the merchant
+            # Intentionally omit payment_methods so OCTO shows all enabled methods for the merchant
         "return_url": settings.OCTO_RETURN_URL,
         "notify_url": settings.OCTO_NOTIFY_URL,
         "language": settings.OCTO_LANGUAGE,
         # ttl optional
     }
 
-    # Merge optional provider-specific parameters from settings FIRST (if provided)
-    # This allows OCTO_EXTRA_PARAMS to set defaults, but user_data below will override
+    # Merge optional provider-specific parameters from settings (if provided)
     if getattr(settings, "OCTO_EXTRA_PARAMS", None):
         try:
             # Shallow merge: top-level keys from OCTO_EXTRA_PARAMS override/add to payload
             extra = dict(settings.OCTO_EXTRA_PARAMS)
-            # Don't let OCTO_EXTRA_PARAMS override user_data - remove it if present
-            if "user_data" in extra:
-                del extra["user_data"]
             payload.update(extra)
         except Exception:
             # Ignore malformed extra params to avoid breaking payment creation
             pass
-
-    # Add user_data if user info is provided AND feature is enabled
-    # OCTO requires all user_data fields to be non-null, so only include if we have valid values
-    # Some OCTO merchant accounts reject user_data, so this is opt-in via OCTO_SEND_USER_DATA
-    if settings.OCTO_SEND_USER_DATA and user_phone and user_name:
-        # Ensure phone and name are not empty strings
-        phone = str(user_phone).strip()
-        name = str(user_name).strip()
-        if phone and name:
-            # OCTO user_data structure - include all required fields
-            user_data_payload = {
-                "user_email": phone if "@" in phone else f"{phone}@phone.uz",
-                "user_name": name,
-                "user_phone": phone  # Add explicit phone field
-            }
-            payload["user_data"] = user_data_payload
-            print(f"[OCTO] Adding user_data: {user_data_payload}")
-        else:
-            print(f"[OCTO] Skipping user_data - empty after strip: phone={repr(user_phone)}, name={repr(user_name)}")
-    else:
-        if user_phone and user_name:
-            print(f"[OCTO] Skipping user_data - OCTO_SEND_USER_DATA is disabled")
-        else:
-            print(f"[OCTO] Skipping user_data - missing: phone={repr(user_phone)}, name={repr(user_name)}")
 
     # According to spec, OCTO may expect secret in header Authorization or X-Auth; here we put Bearer OCTO_SECRET.
     headers = {"Content-Type": "application/json"}
@@ -147,11 +115,8 @@ async def createPayment(
 
     async with httpx.AsyncClient(timeout=20, trust_env=True) as client:
         try:
-            # Debug log URL and payload to help diagnose issues
+            # Debug log URL to help diagnose DNS issues
             print(f"[OCTO] POST {url}")
-            print(f"[OCTO] Payload keys: {list(payload.keys())}")
-            if "user_data" in payload:
-                print(f"[OCTO] user_data content: {payload['user_data']}")
             resp = await client.post(url, json=payload, headers=headers)
             data = resp.json()
         except Exception as e:

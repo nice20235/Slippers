@@ -45,7 +45,6 @@ class Settings(BaseSettings):
     OCTO_CURRENCY: str = "UZS"
     OCTO_USD_UZS_RATE: float | None = None  # Set to enforce min refund >= 1 USD
     OCTO_TEST: bool = False  # Use test mode payments when true
-    OCTO_SEND_USER_DATA: bool = False  # Set to True to send user_data (email, name, phone) to OCTO
     # Optional: pass-through params merged into prepare_payment payload
     # Provide as JSON in .env, e.g. OCTO_EXTRA_PARAMS={"ui": {"ask_for_email": false}}
     OCTO_EXTRA_PARAMS: dict[str, Any] | None = None
