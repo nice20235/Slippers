@@ -104,13 +104,17 @@ async def createPayment(
     }
 
     # Add user_data if user info is provided
-    if user_phone:
-        user_data_payload = {
-            "user_email": user_phone if "@" in (user_phone or "") else f"{user_phone}@phone.uz",
-        }
-        if user_name:
-            user_data_payload["user_name"] = user_name
-        payload["user_data"] = user_data_payload
+    # OCTO requires all user_data fields to be non-null, so only include if we have valid values
+    if user_phone and user_name:
+        # Ensure phone and name are not empty strings
+        phone = str(user_phone).strip()
+        name = str(user_name).strip()
+        if phone and name:
+            user_data_payload = {
+                "user_email": phone if "@" in phone else f"{phone}@phone.uz",
+                "user_name": name
+            }
+            payload["user_data"] = user_data_payload
 
     # Merge optional provider-specific parameters from settings (if provided)
     if getattr(settings, "OCTO_EXTRA_PARAMS", None):
