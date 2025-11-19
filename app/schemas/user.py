@@ -26,6 +26,12 @@ class UserBase(BaseModel):
         max_length=20,
         example="+79991234567"
     )
+    email: Optional[str] = Field(
+        None,
+        description="User's email (optional, used for OCTO payments)",
+        max_length=255,
+        example="user@example.com"
+    )
     is_admin: bool = Field(
         default=False, 
         description="Whether user is an admin",
@@ -71,6 +77,7 @@ class UserCreate(UserBase):
                 "name": "John",
                 "surname": "Doe",
                 "phone_number": "+79991234567",
+                "email": "user@example.com",
                 "password": "securepassword123",
                 "confirm_password": "securepassword123",
                 "is_admin": False
@@ -98,6 +105,12 @@ class UserUpdate(BaseModel):
         min_length=7, 
         max_length=20,
         example="+79991234567"
+    )
+    email: Optional[str] = Field(
+        None,
+        description="User's email (optional)",
+        max_length=255,
+        example="user@example.com"
     )
     is_admin: Optional[bool] = Field(
         None, 
@@ -252,6 +265,7 @@ class UserSelfUpdate(UserUpdate):
                 "name": "John",
                 "surname": "Doe",
                 "phone_number": "+79991234567",
+                "email": "user@example.com",
                 "current_password": "oldpassword123",
                 "new_password": "newsecurepassword123",
                 "confirm_new_password": "newsecurepassword123"

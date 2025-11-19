@@ -54,13 +54,19 @@ def _extract_payment_uuid(data: Dict[str, Any]) -> Optional[str]:
             return c
     return None
 
-async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse:
+async def createPayment(
+    total_sum: int, 
+    description: str,
+    user_name: Optional[str] = None,
+    user_phone: Optional[str] = None,
+    user_email: Optional[str] = None
+) -> OctoPrepareResponse:
     """
     Create payment via OCTO prepare_payment (one-stage, auto_capture).
 
     - currency: UZS
     - payment_methods: uzcard, humo, bank_card
-    - Do NOT send user_data
+    - user_data: Optional user information (name, phone, email) for OCTO
     """
     if total_sum <= 0:
         return OctoPrepareResponse(success=False, errMessage="total_sum must be positive", raw={})
@@ -88,7 +94,6 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
         "auto_capture": bool(settings.OCTO_AUTO_CAPTURE),
         "init_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "test": bool(settings.OCTO_TEST),
-        # user_data omitted intentionally
         "total_sum": float(total_sum),
         "currency": settings.OCTO_CURRENCY,
         "description": description,
@@ -98,6 +103,18 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
         "language": settings.OCTO_LANGUAGE,
         # ttl optional
     }
+
+    # Add user_data if any user information is provided
+    user_data = {}
+    if user_name:
+        user_data["name"] = user_name
+    if user_phone:
+        user_data["phone"] = user_phone
+    if user_email:
+        user_data["email"] = user_email
+    
+    if user_data:
+        payload["user_data"] = user_data
 
     # Merge optional provider-specific parameters from settings (if provided)
     if getattr(settings, "OCTO_EXTRA_PARAMS", None):
