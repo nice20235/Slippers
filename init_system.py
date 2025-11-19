@@ -100,22 +100,6 @@ async def create_admin_user(db: AsyncSession):
         print(f"  🔑 Password: {admin_password}")
         return admin_user
 
-async def run_email_migration():
-    """Add email column to users table if not exists"""
-    from app.db.database import engine
-    from sqlalchemy import text
-    async with engine.begin() as conn:
-        # Add email column
-        await conn.execute(text("""
-            ALTER TABLE users 
-            ADD COLUMN IF NOT EXISTS email VARCHAR(255) UNIQUE NULL
-        """))
-        # Add index
-        await conn.execute(text("""
-            CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)
-        """))
-    print("  ✅ Email column migration completed")
-
 async def main():
     """Main initialization function"""
     print("🚀 Initializing Slippers Order System...")
@@ -126,10 +110,6 @@ async def main():
         print("🗄️  Initializing database...")
         await init_db()
         print("  ✅ Database initialized successfully!")
-        
-        # Run email migration
-        print("📧 Running email column migration...")
-        await run_email_migration()
         
         # Create sample data
         async with AsyncSessionLocal() as db:

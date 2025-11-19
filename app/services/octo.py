@@ -54,19 +54,13 @@ def _extract_payment_uuid(data: Dict[str, Any]) -> Optional[str]:
             return c
     return None
 
-async def createPayment(
-    total_sum: int, 
-    description: str,
-    user_name: Optional[str] = None,
-    user_phone: Optional[str] = None,
-    user_email: Optional[str] = None
-) -> OctoPrepareResponse:
+async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse:
     """
     Create payment via OCTO prepare_payment (one-stage, auto_capture).
 
     - currency: UZS
     - payment_methods: uzcard, humo, bank_card
-    - user_data: Optional user information (name, phone, email) for OCTO
+    - Do NOT send user_data
     """
     if total_sum <= 0:
         return OctoPrepareResponse(success=False, errMessage="total_sum must be positive", raw={})
@@ -94,6 +88,7 @@ async def createPayment(
         "auto_capture": bool(settings.OCTO_AUTO_CAPTURE),
         "init_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "test": bool(settings.OCTO_TEST),
+        # user_data omitted intentionally
         "total_sum": float(total_sum),
         "currency": settings.OCTO_CURRENCY,
         "description": description,
@@ -103,20 +98,6 @@ async def createPayment(
         "language": settings.OCTO_LANGUAGE,
         # ttl optional
     }
-
-    # Add user_data ONLY if we have ALL three required fields with valid values
-    # OCTO documentation: all fields (user_id, phone, email) are REQUIRED when user_data block is present
-    user_data = {}
-    if user_name and user_name.strip():
-        user_data["user_id"] = user_name.strip()  # OCTO uses "user_id" not "name"
-    if user_phone and user_phone.strip():
-        user_data["phone"] = user_phone.strip()
-    if user_email and user_email.strip():
-        user_data["email"] = user_email.strip()
-    
-    # Only include user_data if ALL three fields are present (OCTO requirement)
-    if len(user_data) == 3:  # Must have user_id, phone, AND email
-        payload["user_data"] = user_data
 
     # Merge optional provider-specific parameters from settings (if provided)
     if getattr(settings, "OCTO_EXTRA_PARAMS", None):

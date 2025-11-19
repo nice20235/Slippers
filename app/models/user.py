@@ -15,7 +15,6 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     surname: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     phone_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
-    email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True, index=True)  # Optional email for OCTO payments
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -39,7 +38,6 @@ class User(Base):
         Index('idx_users_name', 'name'),
         Index('idx_users_surname', 'surname'),
         Index('idx_users_phone_number', 'phone_number'),
-        Index('idx_users_email', 'email'),  # Index for email lookups
         Index('idx_users_admin', 'is_admin'),
         Index('idx_users_created_at', 'created_at'),
         Index('idx_users_name_surname', 'name', 'surname'),  # Composite for full name search
