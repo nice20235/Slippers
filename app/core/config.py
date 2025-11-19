@@ -54,6 +54,6 @@ class Settings(BaseSettings):
     APP_WORKERS: int = 1  # only used if a process manager launches multiple workers
 
     # Order guards
-    ORDER_MAX_QTY_PER_ITEM: int = 50  # hard upper bound per order line to prevent accidental huge quantities
+    ORDER_MAX_QTY_PER_ITEM: int = 500  # hard upper bound per order line to prevent accidental huge quantities
 
 settings = Settings() 

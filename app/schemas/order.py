@@ -9,7 +9,7 @@ class OrderItemBase(BaseModel):
         ..., description="Slipper ID", gt=0, example=1
     )
     quantity: int = Field(
-        ..., description="Quantity ordered", gt=0, le=100, example=2
+        ..., description="Quantity ordered", gt=0, le=500, example=2
     )
     unit_price: float = Field(
         ..., description="Unit price at order time (ignored on create, taken from product)", gt=0, example=650.0
@@ -68,7 +68,7 @@ class OrderItemResponse(OrderItemInDB):
 # -------------------- Public (API) simplified schemas --------------------
 class OrderItemCreatePublic(BaseModel):
     slipper_id: int = Field(..., description="Slipper ID", gt=0, example=1)
-    quantity: int = Field(..., description="Quantity ordered", gt=0, le=100, example=2)
+    quantity: int = Field(..., description="Quantity ordered", gt=0, le=500, example=2)
     notes: Optional[str] = Field(None, description="Item notes", max_length=255)
 
 class OrderCreatePublic(BaseModel):
