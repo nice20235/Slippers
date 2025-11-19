@@ -103,28 +103,43 @@ async def createPayment(
         # ttl optional
     }
 
-    # Add user_data if user info is provided
-    # OCTO requires all user_data fields to be non-null, so only include if we have valid values
-    if user_phone and user_name:
-        # Ensure phone and name are not empty strings
-        phone = str(user_phone).strip()
-        name = str(user_name).strip()
-        if phone and name:
-            user_data_payload = {
-                "user_email": phone if "@" in phone else f"{phone}@phone.uz",
-                "user_name": name
-            }
-            payload["user_data"] = user_data_payload
-
-    # Merge optional provider-specific parameters from settings (if provided)
+    # Merge optional provider-specific parameters from settings FIRST (if provided)
+    # This allows OCTO_EXTRA_PARAMS to set defaults, but user_data below will override
     if getattr(settings, "OCTO_EXTRA_PARAMS", None):
         try:
             # Shallow merge: top-level keys from OCTO_EXTRA_PARAMS override/add to payload
             extra = dict(settings.OCTO_EXTRA_PARAMS)
+            # Don't let OCTO_EXTRA_PARAMS override user_data - remove it if present
+            if "user_data" in extra:
+                del extra["user_data"]
             payload.update(extra)
         except Exception:
             # Ignore malformed extra params to avoid breaking payment creation
             pass
+
+    # Add user_data if user info is provided AND feature is enabled
+    # OCTO requires all user_data fields to be non-null, so only include if we have valid values
+    # Some OCTO merchant accounts reject user_data, so this is opt-in via OCTO_SEND_USER_DATA
+    if settings.OCTO_SEND_USER_DATA and user_phone and user_name:
+        # Ensure phone and name are not empty strings
+        phone = str(user_phone).strip()
+        name = str(user_name).strip()
+        if phone and name:
+            # OCTO user_data structure - include all required fields
+            user_data_payload = {
+                "user_email": phone if "@" in phone else f"{phone}@phone.uz",
+                "user_name": name,
+                "user_phone": phone  # Add explicit phone field
+            }
+            payload["user_data"] = user_data_payload
+            print(f"[OCTO] Adding user_data: {user_data_payload}")
+        else:
+            print(f"[OCTO] Skipping user_data - empty after strip: phone={repr(user_phone)}, name={repr(user_name)}")
+    else:
+        if user_phone and user_name:
+            print(f"[OCTO] Skipping user_data - OCTO_SEND_USER_DATA is disabled")
+        else:
+            print(f"[OCTO] Skipping user_data - missing: phone={repr(user_phone)}, name={repr(user_name)}")
 
     # According to spec, OCTO may expect secret in header Authorization or X-Auth; here we put Bearer OCTO_SECRET.
     headers = {"Content-Type": "application/json"}
@@ -132,8 +147,11 @@ async def createPayment(
 
     async with httpx.AsyncClient(timeout=20, trust_env=True) as client:
         try:
-            # Debug log URL to help diagnose DNS issues
+            # Debug log URL and payload to help diagnose issues
             print(f"[OCTO] POST {url}")
+            print(f"[OCTO] Payload keys: {list(payload.keys())}")
+            if "user_data" in payload:
+                print(f"[OCTO] user_data content: {payload['user_data']}")
             resp = await client.post(url, json=payload, headers=headers)
             data = resp.json()
         except Exception as e:
