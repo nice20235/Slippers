@@ -151,6 +151,21 @@ async def create_octo_payment(body: OctoCreateIn, user=Depends(get_current_user)
     user_phone = getattr(user, 'phone_number', None)
     user_email = getattr(user, 'email', None)
     
+    # Validate required fields for OCTO user_data
+    missing_fields = []
+    if not user_name or not user_name.strip():
+        missing_fields.append("name")
+    if not user_phone or not user_phone.strip():
+        missing_fields.append("phone")
+    if not user_email or not user_email.strip():
+        missing_fields.append("email")
+    
+    if missing_fields:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"User profile incomplete. Missing fields for payment: {', '.join(missing_fields)}. Please update your profile before making payment."
+        )
+    
     # Mock external OCTO call via existing service wrapper; fallback fabricate
     res = await createPayment(
         amount, 
