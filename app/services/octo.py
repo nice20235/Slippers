@@ -104,18 +104,18 @@ async def createPayment(
         # ttl optional
     }
 
-    # Add user_data only if we have ALL required fields with valid values
-    # OCTO requires all fields to be non-null when user_data is present
+    # Add user_data ONLY if we have ALL three required fields with valid values
+    # OCTO documentation: all fields (user_id, phone, email) are REQUIRED when user_data block is present
     user_data = {}
     if user_name and user_name.strip():
-        user_data["name"] = user_name.strip()
+        user_data["user_id"] = user_name.strip()  # OCTO uses "user_id" not "name"
     if user_phone and user_phone.strip():
         user_data["phone"] = user_phone.strip()
     if user_email and user_email.strip():
         user_data["email"] = user_email.strip()
     
-    # Only add user_data if we have at least name AND phone (minimum required)
-    if user_data.get("name") and user_data.get("phone"):
+    # Only include user_data if ALL three fields are present (OCTO requirement)
+    if len(user_data) == 3:  # Must have user_id, phone, AND email
         payload["user_data"] = user_data
 
     # Merge optional provider-specific parameters from settings (if provided)
