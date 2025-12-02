@@ -46,7 +46,7 @@ async def read_category(category_id: int, db: AsyncSession = Depends(get_db)):
 async def create_new_category(
     category: CategoryCreate,
     db: AsyncSession = Depends(get_db),
-    current_admin: dict = Depends(get_current_admin),
+    _current_admin: dict = Depends(get_current_admin),
 ):
     """
     Create a new category (Admin only).
@@ -66,7 +66,7 @@ async def update_existing_category(
     category_id: int,
     category: CategoryUpdate,
     db: AsyncSession = Depends(get_db),
-    current_admin: dict = Depends(get_current_admin),
+    _current_admin: dict = Depends(get_current_admin),
 ):
     """
     Update a category (Admin only).
@@ -92,7 +92,7 @@ async def update_existing_category(
 async def delete_existing_category(
     category_id: int,
     db: AsyncSession = Depends(get_db),
-    current_admin: dict = Depends(get_current_admin),
+    _current_admin: dict = Depends(get_current_admin),
 ):
     """
     Delete a category (Admin only).

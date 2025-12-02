@@ -36,13 +36,13 @@ class UserCreate(UserBase):
     )
 
     @validator("confirm_password")
-    def passwords_match(cls, v, values):
+    def passwords_match(_cls, v, values):
         if "password" in values and v != values["password"]:
             raise ValueError("Passwords do not match")
         return v
 
     @validator("phone_number")
-    def validate_phone_number(cls, v):
+    def validate_phone_number(_cls, v):
         if not v:
             raise ValueError("Phone number required")
         v = v.strip()
@@ -95,7 +95,7 @@ class UserUpdate(BaseModel):
     )
 
     @validator("phone_number")
-    def validate_phone_number(cls, v):
+    def validate_phone_number(_cls, v):
         if v is None:
             return v
         v = v.strip()
@@ -194,7 +194,7 @@ class ForgotPasswordRequest(BaseModel):
     )
 
     @validator("confirm_new_password")
-    def passwords_match(cls, v, values):
+    def passwords_match(_cls, v, values):
         if "new_password" in values and v != values["new_password"]:
             raise ValueError("New passwords do not match")
         return v
@@ -219,7 +219,7 @@ class UserSelfUpdate(UserUpdate):
     )
 
     @validator("confirm_new_password")
-    def self_passwords_match(cls, v, values):
+    def self_passwords_match(_cls, v, values):
         # Only validate when changing password
         if values.get("new_password") is not None:
             if v != values.get("new_password"):
@@ -227,7 +227,7 @@ class UserSelfUpdate(UserUpdate):
         return v
 
     @validator("current_password")
-    def require_current_when_changing(cls, v, values):
+    def require_current_when_changing(_cls, v, values):
         # If changing password, current_password must be provided
         if values.get("new_password") is not None and not v:
             raise ValueError("Current password is required to change password")

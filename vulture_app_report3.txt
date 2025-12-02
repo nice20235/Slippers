@@ -1,0 +1,8 @@
+app/schemas/order.py:86: unused variable 'cls' (100% confidence)
+app/schemas/order.py:134: unused variable 'cls' (100% confidence)
+app/schemas/user.py:39: unused variable 'cls' (100% confidence)
+app/schemas/user.py:45: unused variable 'cls' (100% confidence)
+app/schemas/user.py:98: unused variable 'cls' (100% confidence)
+app/schemas/user.py:197: unused variable 'cls' (100% confidence)
+app/schemas/user.py:222: unused variable 'cls' (100% confidence)
+app/schemas/user.py:230: unused variable 'cls' (100% confidence)

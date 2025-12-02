@@ -112,7 +112,7 @@ async def read_slipper(
 async def create_new_slipper(
     slipper: SlipperCreate,
     db: AsyncSession = Depends(get_db),
-    current_admin: dict = Depends(get_current_admin),
+    _current_admin: dict = Depends(get_current_admin),
 ):
     """
     Создать новую тапочку (admin only) через JSON. Картинку загружать отдельным запросом.
@@ -157,7 +157,7 @@ async def update_existing_slipper(
     slipper_id: int,
     slipper: SlipperUpdate,
     db: AsyncSession = Depends(get_db),
-    current_admin: dict = Depends(get_current_admin),
+    _current_admin: dict = Depends(get_current_admin),
 ):
     """
     Update a slipper item (Admin only).
@@ -190,7 +190,7 @@ async def update_existing_slipper(
 async def delete_existing_slipper(
     slipper_id: int,
     db: AsyncSession = Depends(get_db),
-    current_admin: dict = Depends(get_current_admin),
+    _current_admin: dict = Depends(get_current_admin),
 ):
     """
     Delete a slipper item (Admin only).
@@ -223,7 +223,7 @@ async def upload_slipper_images(
     slipper_id: int,
     images: List[UploadFile] = File(...),
     db: AsyncSession = Depends(get_db),
-    current_admin: dict = Depends(get_current_admin),
+    _current_admin: dict = Depends(get_current_admin),
 ):
     """Upload one or many images for a slipper. First image becomes main image if not set."""
     from app.services.slippers_images import (
@@ -285,7 +285,7 @@ async def delete_slipper_image(
     slipper_id: int,
     image_id: int,
     db: AsyncSession = Depends(get_db),
-    current_admin: dict = Depends(get_current_admin),
+    _current_admin: dict = Depends(get_current_admin),
 ):
     """Удалить конкретное изображение тапочки."""
     from app.models.slipper import SlipperImage

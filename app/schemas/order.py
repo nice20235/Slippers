@@ -83,7 +83,7 @@ class OrderCreatePublic(BaseModel):
     notes: Optional[str] = Field(None, description="Order notes", max_length=500)
 
     @validator("items")
-    def validate_items(cls, v):  # type: ignore
+    def validate_items(_cls, v):  # type: ignore
         if not v:
             raise ValueError("Order must have at least one item")
         return v
@@ -131,7 +131,7 @@ class OrderCreate(BaseModel):
     notes: Optional[str] = Field(None, description="Order notes", max_length=500)
 
     @validator("items")
-    def validate_items(cls, v):
+    def validate_items(_cls, v):
         if not v:
             raise ValueError("Order must have at least one item")
         return v
