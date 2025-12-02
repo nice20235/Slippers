@@ -9,27 +9,6 @@ FastAPI-based slippers ordering & payment system with user authentication, catal
 - Auth: JWT (access + refresh) stored in HttpOnly cookies
 - Features: catalog (slippers & categories), multi-image upload, orders, payments, basic admin endpoints
 
-## Security note — .env and secrets
-
-- This repository does NOT track `.env` files. Do NOT commit secrets or credentials to git.
-- Create a local `.env` from `.env.example` and keep it out of version control. The project includes `.gitignore` configured to ignore `.env` and `.venv`.
-
-Example minimal `.env` (never commit real secrets):
-
-```env
-# Database
-DATABASE_URL=postgresql+asyncpg://<user>:<password>@localhost:5432/slippers
-
-# App
-SECRET_KEY=change_me_to_a_secure_random_value
-DEBUG=True
-
-# OCTO (payment gateway) - keep these empty in example
-OCTO_API_BASE=https://secure.octo.uz
-OCTO_SHOP_ID=
-OCTO_SECRET=
-OCTO_NOTIFY_URL=http://your-host/payments/octo/notify
-```
 
 ## Setup (development)
 
