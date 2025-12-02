@@ -4,7 +4,7 @@ from sqlalchemy.orm import selectinload, joinedload
 from sqlalchemy import func, and_
 from app.models.order import Order, OrderItem, OrderStatus
 from app.models.slipper import Slipper
-from app.schemas.order import OrderCreate, OrderUpdate, OrderItemCreate
+from app.schemas.order import OrderCreate, OrderUpdate
 from typing import Optional, List, Tuple
 import logging
 from app.models.payment import Payment, PaymentStatus
@@ -13,18 +13,22 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-async def get_order(db: AsyncSession, order_id: int, load_relationships: bool = True) -> Optional[Order]:
+
+async def get_order(
+    db: AsyncSession, order_id: int, load_relationships: bool = True
+) -> Optional[Order]:
     """Get order by ID with optional relationship loading"""
     query = select(Order).where(Order.id == order_id)
-    
+
     if load_relationships:
         query = query.options(
             joinedload(Order.user),
-            selectinload(Order.items).selectinload(OrderItem.slipper)
+            selectinload(Order.items).selectinload(OrderItem.slipper),
         )
-    
+
     result = await db.execute(query)
     return result.scalar_one_or_none()
+
 
 async def get_orders(
     db: AsyncSession,
@@ -32,34 +36,35 @@ async def get_orders(
     limit: int = 100,
     user_id: Optional[int] = None,
     status: Optional[OrderStatus] = None,
-    load_relationships: bool = True
+    load_relationships: bool = True,
 ) -> Tuple[List[Order], int]:
     """Get orders with pagination and filters - highly optimized"""
     # Build base query with efficient eager loading
     query = select(Order)
     conditions = []
-    
+
     # Apply filters
     if user_id is not None:
         conditions.append(Order.user_id == user_id)
     if status is not None:
         conditions.append(Order.status == status)
-    
+
     if conditions:
         query = query.where(and_(*conditions))
-    
+
     # Add relationships with optimal loading strategy
     if load_relationships:
         query = query.options(
             joinedload(Order.user),  # One-to-one, use joined load
-            selectinload(Order.items).selectinload(OrderItem.slipper)  # One-to-many, use selectinload
+            selectinload(Order.items).selectinload(
+                OrderItem.slipper
+            ),  # One-to-many, use selectinload
         )
-    
+
     # Order by created_at desc for latest-first
     query = query.order_by(Order.created_at.desc())
-    
+
     # Optimized: single query with window function (PostgreSQL)
-    from sqlalchemy import over
     count_col = func.count().over()
     query_with_count = query.add_columns(count_col)
     result = await db.execute(query_with_count.offset(skip).limit(limit))
@@ -69,7 +74,7 @@ async def get_orders(
         total = rows[0][1] if rows else 0
     else:
         orders, total = [], 0
-    
+
     return orders, total
 
 
@@ -131,6 +136,7 @@ async def get_orders_by_payment_statuses(
     rows = (await db.execute(base)).unique().all()
     return rows, total
 
+
 async def create_order(
     db: AsyncSession,
     order: OrderCreate,
@@ -153,7 +159,7 @@ async def create_order(
                 select(Order)
                 .options(
                     selectinload(Order.user),
-                    selectinload(Order.items).selectinload(OrderItem.slipper)
+                    selectinload(Order.items).selectinload(OrderItem.slipper),
                 )
                 .where(Order.id == existing.id)
             )
@@ -185,7 +191,11 @@ async def create_order(
         new_items_total = 0.0
         # For each incoming item, merge into existing or create new
         for item_data in order.items:
-            slipper = (await db.execute(select(Slipper).where(Slipper.id == item_data.slipper_id))).scalar_one_or_none()
+            slipper = (
+                await db.execute(
+                    select(Slipper).where(Slipper.id == item_data.slipper_id)
+                )
+            ).scalar_one_or_none()
             if not slipper:
                 raise ValueError(f"Slipper with ID {item_data.slipper_id} not found")
             unit_price = slipper.price
@@ -207,17 +217,23 @@ async def create_order(
                 db.add(oi)
                 new_items_total += oi.total_price
         # Recalculate total_amount (sum of all items)
-        current_total = sum((it.total_price or 0.0) for it in (merge_target.items or []))
+        current_total = sum(
+            (it.total_price or 0.0) for it in (merge_target.items or [])
+        )
         merge_target.total_amount = current_total + new_items_total
         db.add(merge_target)
         await db.commit()
         await db.refresh(merge_target)
         # Second pass: re-load items to ensure totals reflect DB state, then recompute precise total
         reloaded = await db.execute(
-            select(Order).options(selectinload(Order.items)).where(Order.id == merge_target.id)
+            select(Order)
+            .options(selectinload(Order.items))
+            .where(Order.id == merge_target.id)
         )
         merge_obj = reloaded.scalar_one()
-        merge_obj.total_amount = sum((it.total_price or 0.0) for it in (merge_obj.items or []))
+        merge_obj.total_amount = sum(
+            (it.total_price or 0.0) for it in (merge_obj.items or [])
+        )
         db.add(merge_obj)
         await db.commit()
         await db.refresh(merge_obj)
@@ -226,7 +242,7 @@ async def create_order(
             select(Order)
             .options(
                 selectinload(Order.user),
-                selectinload(Order.items).selectinload(OrderItem.slipper)
+                selectinload(Order.items).selectinload(OrderItem.slipper),
             )
             .where(Order.id == merge_target.id)
         )
@@ -234,27 +250,32 @@ async def create_order(
     # Calculate total amount
     total_amount = 0.0
     order_items = []
-    
+
     for item_data in order.items:
         # Get slipper to verify it exists and get current price
-        slipper_result = await db.execute(select(Slipper).where(Slipper.id == item_data.slipper_id))
+        slipper_result = await db.execute(
+            select(Slipper).where(Slipper.id == item_data.slipper_id)
+        )
         slipper = slipper_result.scalar_one_or_none()
         if not slipper:
             raise ValueError(f"Slipper with ID {item_data.slipper_id} not found")
         # Clamp unrealistic quantities to prevent client mistakes (e.g., using inventory qty)
         from app.core.config import settings
+
         qty = int(item_data.quantity)
         if qty > settings.ORDER_MAX_QTY_PER_ITEM:
             qty = settings.ORDER_MAX_QTY_PER_ITEM
-        
+
         # Use current slipper price
         unit_price = slipper.price
         total_price = unit_price * qty
         total_amount += total_price
-        
+
         # Create order item (use slipper_id)
         # Consolidate by slipper_id within this creation batch
-        existing = next((oi for oi in order_items if oi.slipper_id == item_data.slipper_id), None)
+        existing = next(
+            (oi for oi in order_items if oi.slipper_id == item_data.slipper_id), None
+        )
         if existing:
             existing.quantity += qty
             existing.unit_price = unit_price
@@ -267,10 +288,10 @@ async def create_order(
                 quantity=qty,
                 unit_price=unit_price,
                 total_price=total_price,
-                notes=item_data.notes
+                notes=item_data.notes,
             )
             order_items.append(order_item)
-    
+
     # Create order with temporary unique placeholder order_id if none provided
     provided_order_id = order.order_id
     temp_placeholder = None
@@ -284,7 +305,7 @@ async def create_order(
         total_amount=total_amount,
         notes=order.notes,
         status=OrderStatus.PENDING,
-        idempotency_key=idempotency_key
+        idempotency_key=idempotency_key,
     )
     db.add(db_order)
     await db.flush()  # obtain primary key
@@ -336,13 +357,16 @@ async def create_order(
         select(Order)
         .options(
             selectinload(Order.user),
-            selectinload(Order.items).selectinload(OrderItem.slipper)
+            selectinload(Order.items).selectinload(OrderItem.slipper),
         )
         .where(Order.id == db_order.id)
     )
     return result.scalar_one()
 
-async def update_order(db: AsyncSession, db_order: Order, order_update: OrderUpdate) -> Order:
+
+async def update_order(
+    db: AsyncSession, db_order: Order, order_update: OrderUpdate
+) -> Order:
     """Update an existing order and return with relationships."""
     update_data = order_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -354,33 +378,37 @@ async def update_order(db: AsyncSession, db_order: Order, order_update: OrderUpd
         select(Order)
         .options(
             selectinload(Order.user),
-            selectinload(Order.items).selectinload(OrderItem.slipper)
+            selectinload(Order.items).selectinload(OrderItem.slipper),
         )
         .where(Order.id == db_order.id)
     )
     return result.scalar_one()
 
-async def update_order_status(db: AsyncSession, order_id: int, status: OrderStatus) -> Optional[Order]:
+
+async def update_order_status(
+    db: AsyncSession, order_id: int, status: OrderStatus
+) -> Optional[Order]:
     """Update order status"""
     order = await get_order(db, order_id)
     if not order:
         return None
-    
+
     order.status = status
     db.add(order)
     await db.commit()
     await db.refresh(order)
-    
+
     # Load relationships
     result = await db.execute(
         select(Order)
         .options(
             selectinload(Order.user),
-            selectinload(Order.items).selectinload(OrderItem.slipper)
+            selectinload(Order.items).selectinload(OrderItem.slipper),
         )
         .where(Order.id == order.id)
     )
     return result.scalar_one()
+
 
 async def delete_order(db: AsyncSession, db_order: Order) -> bool:
     """Delete order (cascade will delete items)"""
@@ -388,7 +416,10 @@ async def delete_order(db: AsyncSession, db_order: Order) -> bool:
     await db.commit()
     return True
 
-async def update_order_payment_uuid(db: AsyncSession, order_id: int, payment_uuid: str) -> Optional[Order]:
+
+async def update_order_payment_uuid(
+    db: AsyncSession, order_id: int, payment_uuid: str
+) -> Optional[Order]:
     """Attach or update payment_uuid for an order (internal use only, not exposed)."""
     order = await get_order(db, order_id, load_relationships=False)
     if not order:
@@ -399,11 +430,9 @@ async def update_order_payment_uuid(db: AsyncSession, order_id: int, payment_uui
     await db.refresh(order)
     return order
 
+
 async def get_user_orders(
-    db: AsyncSession,
-    user_id: int,
-    skip: int = 0,
-    limit: int = 100
+    db: AsyncSession, user_id: int, skip: int = 0, limit: int = 100
 ) -> Tuple[List[Order], int]:
     """Get orders for specific user"""
-    return await get_orders(db, skip, limit, user_id=user_id) 
+    return await get_orders(db, skip, limit, user_id=user_id)

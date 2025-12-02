@@ -1,12 +1,15 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
+
 class CartItemCreate(BaseModel):
     slipper_id: int = Field(..., ge=1)
     quantity: int = Field(1, ge=1, le=999)
 
+
 class CartItemUpdate(BaseModel):
     quantity: int = Field(..., ge=0, le=999)  # quantity 0 => remove
+
 
 class CartItemOut(BaseModel):
     id: int
@@ -18,6 +21,7 @@ class CartItemOut(BaseModel):
 
     class Config:
         from_attributes = True
+
 
 class CartOut(BaseModel):
     id: int
@@ -34,5 +38,3 @@ class CartTotalOut(BaseModel):
     total_items: int = Field(..., description="Number of distinct items in cart")
     total_quantity: int = Field(..., description="Sum of quantities across items")
     total_amount: float = Field(..., description="Sum of price*quantity for all items")
-
-

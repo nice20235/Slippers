@@ -5,4 +5,4 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, stored_password: str) -> bool:
     """Verify password by direct comparison"""
-    return password == stored_password 
+    return password == stored_password

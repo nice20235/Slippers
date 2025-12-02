@@ -7,6 +7,7 @@ from datetime import datetime
 from pydantic import BaseModel
 from app.core.config import settings
 
+
 # ----- Pydantic response models (minimal) -----
 class OctoPrepareResponse(BaseModel):
     success: bool
@@ -17,17 +18,20 @@ class OctoPrepareResponse(BaseModel):
     errMessage: Optional[str] = None
     raw: Dict[str, Any]
 
+
 class OctoRefundResponse(BaseModel):
     success: bool
     errCode: Optional[int] = None
     errMessage: Optional[str] = None
     raw: Dict[str, Any]
 
+
 # ----- Helper: HMAC signature (if OCTO requires; placeholder here) -----
 def _make_signature(payload: Dict[str, Any], secret: str) -> str:
     # Depending on OCTO requirements; placeholder for future use
     msg = "|".join(f"{k}={payload[k]}" for k in sorted(payload.keys()))
     return hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()
+
 
 # ----- Public API -----
 def _extract_payment_uuid(data: Dict[str, Any]) -> Optional[str]:
@@ -54,6 +58,7 @@ def _extract_payment_uuid(data: Dict[str, Any]) -> Optional[str]:
             return c
     return None
 
+
 async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse:
     """
     Create payment via OCTO prepare_payment (one-stage, auto_capture).
@@ -63,7 +68,9 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
     - Do NOT send user_data
     """
     if total_sum <= 0:
-        return OctoPrepareResponse(success=False, errMessage="total_sum must be positive", raw={})
+        return OctoPrepareResponse(
+            success=False, errMessage="total_sum must be positive", raw={}
+        )
 
     # Validate required settings
     missing = []
@@ -76,13 +83,19 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
     if not settings.OCTO_NOTIFY_URL:
         missing.append("OCTO_NOTIFY_URL")
     if missing:
-        return OctoPrepareResponse(success=False, errMessage=f"Missing settings: {', '.join(missing)}", raw={})
+        return OctoPrepareResponse(
+            success=False, errMessage=f"Missing settings: {', '.join(missing)}", raw={}
+        )
 
     shop_transaction_id = str(uuid.uuid4())
 
     payload: Dict[str, Any] = {
         # Exact fields per docs
-        "octo_shop_id": int(settings.OCTO_SHOP_ID) if str(settings.OCTO_SHOP_ID).isdigit() else settings.OCTO_SHOP_ID,
+        "octo_shop_id": (
+            int(settings.OCTO_SHOP_ID)
+            if str(settings.OCTO_SHOP_ID).isdigit()
+            else settings.OCTO_SHOP_ID
+        ),
         "octo_secret": settings.OCTO_SECRET,
         "shop_transaction_id": shop_transaction_id,
         "auto_capture": bool(settings.OCTO_AUTO_CAPTURE),
@@ -92,7 +105,7 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
         "total_sum": float(total_sum),
         "currency": settings.OCTO_CURRENCY,
         "description": description,
-            # Intentionally omit payment_methods so OCTO shows all enabled methods for the merchant
+        # Intentionally omit payment_methods so OCTO shows all enabled methods for the merchant
         "return_url": settings.OCTO_RETURN_URL,
         "notify_url": settings.OCTO_NOTIFY_URL,
         "language": settings.OCTO_LANGUAGE,
@@ -120,13 +133,17 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
             resp = await client.post(url, json=payload, headers=headers)
             data = resp.json()
         except Exception as e:
-            return OctoPrepareResponse(success=False, errMessage=f"HTTP error: {e}", raw={})
+            return OctoPrepareResponse(
+                success=False, errMessage=f"HTTP error: {e}", raw={}
+            )
     # Per docs, error==0 on success; data contains payment info
     if data.get("error") != 0:
         return OctoPrepareResponse(
             success=False,
             error=data.get("error"),
-            errMessage=data.get("errMessage") or data.get("errorMessage") or "Unknown OCTO error",
+            errMessage=data.get("errMessage")
+            or data.get("errorMessage")
+            or "Unknown OCTO error",
             raw=data,
         )
     d = data.get("data") or {}
@@ -147,15 +164,20 @@ async def createPayment(total_sum: int, description: str) -> OctoPrepareResponse
         raw=data,
     )
 
+
 async def refundPayment(octo_payment_UUID: str, amount: int) -> OctoRefundResponse:
     """
     Refund payment via OCTO API. Minimum amount is 1 USD (equivalent in UZS).
     If OCTO doesn't accept UZS for refund amount, adapt as necessary.
     """
     if not octo_payment_UUID:
-        return OctoRefundResponse(success=False, errMessage="payment UUID required", raw={})
+        return OctoRefundResponse(
+            success=False, errMessage="payment UUID required", raw={}
+        )
     if amount <= 0:
-        return OctoRefundResponse(success=False, errMessage="amount must be positive", raw={})
+        return OctoRefundResponse(
+            success=False, errMessage="amount must be positive", raw={}
+        )
 
     # Optionally enforce min refund 1 USD equivalence if rate is provided.
     # If the rate isn't set, we skip local enforcement and rely on OCTO to validate.
@@ -163,7 +185,11 @@ async def refundPayment(octo_payment_UUID: str, amount: int) -> OctoRefundRespon
         try:
             min_uzs = int(round(1.0 * float(settings.OCTO_USD_UZS_RATE)))
             if amount < min_uzs:
-                return OctoRefundResponse(success=False, errMessage=f"Minimum refund is >= {min_uzs} UZS (1 USD)", raw={})
+                return OctoRefundResponse(
+                    success=False,
+                    errMessage=f"Minimum refund is >= {min_uzs} UZS (1 USD)",
+                    raw={},
+                )
         except Exception:
             # If the provided rate is invalid, ignore local check and rely on OCTO
             pass
@@ -175,10 +201,16 @@ async def refundPayment(octo_payment_UUID: str, amount: int) -> OctoRefundRespon
     if not settings.OCTO_SECRET:
         missing.append("OCTO_SECRET")
     if missing:
-        return OctoRefundResponse(success=False, errMessage=f"Missing settings: {', '.join(missing)}", raw={})
+        return OctoRefundResponse(
+            success=False, errMessage=f"Missing settings: {', '.join(missing)}", raw={}
+        )
 
     payload: Dict[str, Any] = {
-        "octo_shop_id": int(settings.OCTO_SHOP_ID) if str(settings.OCTO_SHOP_ID).isdigit() else settings.OCTO_SHOP_ID,
+        "octo_shop_id": (
+            int(settings.OCTO_SHOP_ID)
+            if str(settings.OCTO_SHOP_ID).isdigit()
+            else settings.OCTO_SHOP_ID
+        ),
         "shop_refund_id": str(uuid.uuid4()),
         "octo_secret": settings.OCTO_SECRET,
         "octo_payment_UUID": octo_payment_UUID,
@@ -194,12 +226,16 @@ async def refundPayment(octo_payment_UUID: str, amount: int) -> OctoRefundRespon
             resp = await client.post(url, json=payload, headers=headers)
             data = resp.json()
         except Exception as e:
-            return OctoRefundResponse(success=False, errMessage=f"HTTP error: {e}", raw={})
+            return OctoRefundResponse(
+                success=False, errMessage=f"HTTP error: {e}", raw={}
+            )
 
     if data.get("error") != 0:
         return OctoRefundResponse(
             success=False,
-            errMessage=data.get("errMessage") or data.get("errorMessage") or "Unknown OCTO error",
+            errMessage=data.get("errMessage")
+            or data.get("errorMessage")
+            or "Unknown OCTO error",
             raw=data,
         )
 

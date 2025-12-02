@@ -10,15 +10,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Helper to load a cart with items + slippers eagerly
-_cart_with_items = lambda: [selectinload(Cart.items).selectinload(CartItem.slipper)]  # noqa: E731
+_cart_with_items = lambda: [
+    selectinload(Cart.items).selectinload(CartItem.slipper)
+]  # noqa: E731
+
 
 async def _reload_cart(db: AsyncSession, cart_id: int) -> Cart:
     q = await db.execute(
-        select(Cart)
-        .where(Cart.id == cart_id)
-        .options(*_cart_with_items())
+        select(Cart).where(Cart.id == cart_id).options(*_cart_with_items())
     )
     return q.scalar_one()
+
 
 async def get_or_create_cart(db: AsyncSession, user_id: int) -> Cart:
     # Deterministically pick the oldest cart if duplicates exist (data repair may still be running)
@@ -36,18 +38,20 @@ async def get_or_create_cart(db: AsyncSession, user_id: int) -> Cart:
     await db.commit()
     return await _reload_cart(db, cart.id)
 
+
 async def get_cart(db: AsyncSession, user_id: int) -> Optional[Cart]:
     q = await db.execute(
-        select(Cart)
-        .where(Cart.user_id == user_id)
-        .options(*_cart_with_items())
+        select(Cart).where(Cart.user_id == user_id).options(*_cart_with_items())
     )
     return q.scalar_one_or_none()
+
 
 async def add_item(db: AsyncSession, user_id: int, item: CartItemCreate) -> Cart:
     cart = await get_or_create_cart(db, user_id)
     # Ensure slipper exists
-    slipper = (await db.execute(select(Slipper).where(Slipper.id == item.slipper_id))).scalar_one_or_none()
+    slipper = (
+        await db.execute(select(Slipper).where(Slipper.id == item.slipper_id))
+    ).scalar_one_or_none()
     if not slipper:
         raise ValueError("Slipper not found")
     # Merge or add
@@ -57,11 +61,18 @@ async def add_item(db: AsyncSession, user_id: int, item: CartItemCreate) -> Cart
             db.add(ci)
             break
     else:
-        db.add(CartItem(cart_id=cart.id, slipper_id=item.slipper_id, quantity=item.quantity))
+        db.add(
+            CartItem(
+                cart_id=cart.id, slipper_id=item.slipper_id, quantity=item.quantity
+            )
+        )
     await db.commit()
     return await _reload_cart(db, cart.id)
 
-async def update_item(db: AsyncSession, user_id: int, cart_item_id: int, update: CartItemUpdate) -> Cart:
+
+async def update_item(
+    db: AsyncSession, user_id: int, cart_item_id: int, update: CartItemUpdate
+) -> Cart:
     cart = await get_or_create_cart(db, user_id)
     target = next((ci for ci in cart.items if ci.id == cart_item_id), None)
     if not target:
@@ -74,6 +85,7 @@ async def update_item(db: AsyncSession, user_id: int, cart_item_id: int, update:
     await db.commit()
     return await _reload_cart(db, cart.id)
 
+
 async def remove_item(db: AsyncSession, user_id: int, cart_item_id: int) -> Cart:
     cart = await get_or_create_cart(db, user_id)
     target = next((ci for ci in cart.items if ci.id == cart_item_id), None)
@@ -82,6 +94,7 @@ async def remove_item(db: AsyncSession, user_id: int, cart_item_id: int) -> Cart
     await db.delete(target)
     await db.commit()
     return await _reload_cart(db, cart.id)
+
 
 async def clear_cart(db: AsyncSession, user_id: int) -> Cart:
     cart = await get_or_create_cart(db, user_id)
@@ -120,4 +133,3 @@ async def get_cart_totals(db: AsyncSession, user_id: int) -> tuple[int, int, flo
     total_quantity = int(total_quantity or 0)
     total_amount = float(total_amount or 0.0)
     return total_items, total_quantity, total_amount
-

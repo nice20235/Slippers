@@ -48,193 +48,98 @@ FastAPI-based slippers ordering & payment system with user authentication, catal
   OCTO_AUTO_CAPTURE=true
   OCTO_CURRENCY=UZS
   OCTO_TEST=true
-  # Optional JSON (must be a single line):
-  # OCTO_EXTRA_PARAMS={"ui":{"ask_for_email":false}}
+  # Slippers API
 
-  # --- Optional refund min USD logic ---
-  # OCTO_USD_UZS_RATE=12600
+  FastAPI-based backend for slippers ordering, catalog, user management and OCTO payments.
 
-  # --- Rate limiting ---
-  RATE_LIMIT_REQUESTS=100
-  RATE_LIMIT_WINDOW_SEC=60
-  RATE_LIMIT_EXCLUDE_PATHS=/docs,/redoc,/openapi.json,/favicon.ico,/static
+  This README was trimmed and corrected to reflect the current repository state. Removed references to transient scripts and helper files that are not part of the repository.
+
+  ## Quick overview
+
+  - Stack: FastAPI, async SQLAlchemy (2.x), PostgreSQL (asyncpg), Pydantic v2
+  - Payments: OCTO gateway integration (create, webhook notify, refund)
+  - Auth: JWT (access + refresh) stored in HttpOnly cookies
+  - Features: catalog (slippers & categories), multi-image upload, orders, payments, basic admin endpoints
+
+  ## Requirements
+
+  - Python 3.10+ (recommended)
+  - PostgreSQL database
+  - See `requirements.txt` for Python dependencies
+
+  ## Setup (development)
+
+  1. Install dependencies
+
+  ```bash
+  python3 -m venv .venv
+  source .venv/bin/activate
+  pip install -r requirements.txt
+  ```
+
+  2. Copy `.env.example` (if you have one) or create `.env` in the project root. Minimal variables:
+
+  ```env
+  DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/slippers
+  SECRET_KEY=change_me
+  OCTO_API_BASE=https://secure.octo.uz
+  OCTO_SHOP_ID=
+  OCTO_SECRET=
+  OCTO_NOTIFY_URL=http://your-host/payments/octo/notify
   DEBUG=True
   ```
 
-3. **Database Setup**
-  - PostgreSQL: Create database manually or let the app auto-create it on first run
-  - Connection pool optimized for high performance (50 base + 100 overflow connections)
+  3. Initialize sample data (optional)
 
-4. **Run the application**
-  ```bash
-  python -m uvicorn app.main:app --reload
-  ```
-  
-  For production with performance optimizations:
-  ```bash
-  ./run_optimized.sh
-  ```
-
-5. **Initialize sample data (optional)**
   ```bash
   python init_system.py
   ```
 
-## API Endpoints
+  4. Run dev server
 
-### Authentication
-- `POST /auth/register` - Register a new user
-- `POST /auth/login` - Login and get access/refresh tokens
-- `POST /auth/refresh` - Get new access token using refresh token
-- `POST /auth/reset-password` - Reset user password
-- `POST /auth/logout` - Logout (client-side token deletion)
+  ```bash
+  python -m uvicorn app.main:app --reload
+  ```
 
-### Users (Admin only)
-- `GET /users/` - List all users
-- `GET /users/{user_id}` - Get user details
-- `DELETE /users/{user_id}` - Delete user
+  For production, run uvicorn/gunicorn with multiple workers behind a reverse proxy (nginx). This repo doesn't include production helper scripts by default; adapt the service file you use in deployment.
 
-### Slippers (Admin only for create/update/delete)
-- `GET /slippers/` - List slippers (pagination, search, sort, category filter)
-- `GET /slippers/{id}` - Retrieve slipper (optional images)
-- `POST /slippers/` - Create slipper (no image)
-- `PUT /slippers/{id}` - Update slipper
-- `DELETE /slippers/{id}` - Delete slipper
-- `POST /slippers/{id}/upload-images` - Upload up to 10 images
-- `GET /slippers/{id}/images` - List images
-- `DELETE /slippers/{id}/images/{image_id}` - Delete image
+  ## Database
 
-### Orders
-- `GET /orders/` - List orders (user restricted; admin sees all)
-- `GET /orders/?finance=paid_refunded` - Finance view (only orders whose latest payment is PAID or REFUNDED)
-- `POST /orders/` - Create order with items
-- `PUT /orders/{order_id}` - Update order
-- `DELETE /orders/{order_id}` - Delete order
+  - The app uses async SQLAlchemy models in `app/models`.
+  - Create the PostgreSQL database manually and provide `DATABASE_URL`.
+  - Migrations are not included in this repo; the codebase uses a minimal set of migration helpers when needed.
 
-### Payments (OCTO)
-- `POST /payments/octo/create` - Create OCTO payment (accepts amount / total_sum aliases and orderId)
-- `POST /payments/octo/refund` - Refund by `octo_payment_UUID`
-- `POST /payments/octo/notify` - Webhook (configured in OCTO panel). Updates payment + order status.
+  ## Important endpoints (summary)
 
-Webhook will set order status to confirmed on final success statuses: `paid,captured,completed,succeeded`.
+  - Auth: `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`
+  - Users: `/users/` (admin), `/users/{id}`
+  - Slippers: `/slippers/`, `/slippers/{id}`, image upload endpoints
+  - Orders: `/orders/` (create/update/list)
+  - Payments (OCTO): `/payments/octo/create`, `/payments/octo/notify`, `/payments/octo/refund`
 
-## Usage Examples
+  See the code in `app/api/endpoints` for full request/response details and validation schemas.
 
-### Register a new user
-```bash
-curl -X POST "http://localhost:8000/auth/register" \
-  -H "Content-Type: application/json" \
-  -d '{"username": "john_doe", "email": "john@example.com", "password": "password123"}'
-```
+  ## OCTO integration notes
 
-### Login
-```bash
-curl -X POST "http://localhost:8000/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{"username": "john_doe", "password": "password123"}'
-```
+  - By default, the app does not send `user_data` to OCTO unless configured and validated. See `app/services/octo.py` and `app/core/config.py` for `OCTO_EXTRA_PARAMS` and `OCTO_SEND_USER_DATA` flags.
+  - Ensure `OCTO_NOTIFY_URL` is reachable by OCTO and responds quickly. The webhook updates payment and order status on notify.
 
-### Create slipper (Admin only)
-```bash
-curl -X POST "http://localhost:8000/slippers/" \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Cozy Home Slipper", "size": "42", "price": 19.99, "quantity": 10, "category_id": 1}'
-```
+  ## Maintenance & cleanup performed
 
-### Create order
-```bash
-curl -X POST "http://localhost:8000/orders/" \
-  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":1, "items":[{"slipper_id":1, "quantity":2}]}'
-```
+  - Removed references to transient `scripts/` helpers from the README (the directory is not present).
+  - Ensured README only references files and services that exist in this repository.
 
-### Create OCTO payment
-```bash
-curl -X POST "http://localhost:8000/payments/octo/create" \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 50000, "description": "Order #123", "orderId": 1}'
-```
+  ## Contributing / Next steps
 
-### Refund OCTO payment
-```bash
-curl -X POST "http://localhost:8000/payments/octo/refund" \
-  -H "Content-Type: application/json" \
-  -d '{"octo_payment_UUID": "uuid-here", "amount": 50000}'
-```
+  If you want me to continue with deeper architecture cleanup (safe refactors, remove dead code, add typing & ruff/black, CI, tests), tell me which of the following you want prioritized:
 
-## Token Management
+  1. Add automated linting (ruff/black) and fix style issues
+  2. Add/enable tests (pytest) and a few unit/integration tests for core flows
+  3. Remove deprecated modules and run a code-usage analysis to safely delete dead code
+  4. Produce a short architecture diagram and a one-page technical summary for leadership
 
-- **Access Token**: Valid for 15 minutes (configurable)
-- **Refresh Token**: Valid for 7 days
-- Use the refresh token to get a new access token when it expires
+  Pick one or more items and I will proceed.
 
-## Core Models (simplified)
+  ---
 
-- **User**: name, surname, phone_number, hashed_password, is_admin, created_at
-- **Category**: name, description, is_active
-- **Slipper**: name, size, price, quantity, category_id, image, timestamps
-- **SlipperImage**: slipper_id, path, order_index, flags
-- **Order**: order_id, user_id, status, total_amount + items
-- **OrderItem**: order_id, slipper_id, quantity, unit_price
-- **Payment**: order_id, amount, status (CREATED,PENDING,PAID,FAILED,CANCELLED,REFUNDED), external refs
-
-## Security & Performance
-
-- Password hashing (bcrypt)
-- JWT tokens in HttpOnly cookies (mitigates XSS token theft)
-- Rate limiting (global + configurable exclusions)
-- Security headers middleware (CSP skeleton, can be extended)
-- Input validation via Pydantic v2
-- Optional gzip compression
-- Caching layer (in-memory) with key prefix + invalidation
-
-## Production Notes
-
-- PostgreSQL optimized with connection pooling (50 base + 100 overflow connections)
-- Performance features: uvloop event loop, httptools HTTP parser, prepared statement cache
-- Set `DEBUG=False` and tighten `ALLOWED_ORIGINS`
-- Use systemd service (see `slippers-optimized.service`) + reverse proxy (nginx)
-- Configure HTTPS for secure cookies (`COOKIE_SECURE=True`)
-- Keep `OCTO_NOTIFY_URL` publicly reachable and return 200 quickly
-- Add webhook signature validation (TODO enhancement)
-- Database sequence fix scripts available in `scripts/` directory
-
-## Performance Optimizations
-
-- **Connection Pooling**: QueuePool with 50 connections + 100 overflow
-- **Query Optimization**: Window functions for single-query pagination
-- **Caching**: In-memory TTL cache with pattern invalidation
-- **Event Loop**: uvloop (2-4x faster than default asyncio)
-- **HTTP Parser**: httptools for faster request parsing
-- **Middleware**: Optimized rate limiting with O(1) deque operations
-- **Deployment**: Multi-worker setup with 4 uvicorn workers
-
-Run with optimizations:
-```bash
-./run_optimized.sh
-```
-
-## Troubleshooting
-
-### Duplicate Key Errors
-If you see "duplicate key value violates unique constraint" errors, run the sequence fix:
-```bash
-cd scripts
-./EMERGENCY_FIX.sh
-```
-
-See `scripts/FIX_NOW.md` or `scripts/PRODUCTION_FIX.md` for detailed instructions.
-
-## Future Improvements
-
-- Webhook signature / HMAC verification
-- Idempotency key handling for notify events
-- Indexes review for query optimization
-- Background task for clearing stale PENDING payments
-- Redis cache backend option
-
----
-
-Happy hacking 🥿
+  Happy hacking 🥿

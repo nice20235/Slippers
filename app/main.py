@@ -1,18 +1,23 @@
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 import uvicorn
 import os
 import logging
-import time
 from datetime import datetime
 from dotenv import load_dotenv
+from collections import defaultdict, deque
+import time
 
 from app.core.config import settings
-from app.core.middleware import PerformanceMiddleware, CompressionHeaderMiddleware, SecurityHeadersMiddleware
+from app.core.middleware import (
+    PerformanceMiddleware,
+    CompressionHeaderMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.core.cache import cache
 from app.db.database import init_db, close_db
 from app.api.endpoints import users, slippers, orders, categories
@@ -20,18 +25,19 @@ from app.api.endpoints import cart as cart_router
 from app.api.endpoints import octo as octo_payments
 from app.auth.routes import auth_router
 from app.auth.dependencies import get_current_admin
-from app.schemas.responses import HealthCheckResponse, ErrorResponse
+from app.schemas.responses import HealthCheckResponse
 
 load_dotenv()
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO if settings.DEBUG else logging.WARNING,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
+
 
 # Application lifespan manager
 @asynccontextmanager
@@ -39,43 +45,44 @@ async def lifespan(app: FastAPI):
     """Manage application startup and shutdown with optimizations"""
     # Startup
     logger.info("🚀 Starting Slippers Order System...")
-    
+
     try:
         # Initialize database
         await init_db()
         logger.info("✅ Database initialized")
-        
+
         # Initialize cache
         await cache.clear()  # Start with clean cache
         logger.info("✅ Cache initialized")
-        
+
         # Warm up critical cache entries if needed
         # await warm_up_cache()
-        
+
         logger.info("✅ Application started successfully!")
-        
+
     except Exception as e:
         logger.error(f"❌ Failed to start application: {e}")
         raise
-    
+
     yield
-    
+
     # Shutdown
     logger.info("🛑 Shutting down...")
-    
+
     try:
         # Clean up cache
         await cache.clear()
         logger.info("✅ Cache cleared")
-        
+
         # Close database connections
         await close_db()
         logger.info("✅ Database connections closed")
-        
+
         logger.info("✅ Application shutdown complete!")
-        
+
     except Exception as e:
         logger.error(f"❌ Error during shutdown: {e}")
+
 
 # Create FastAPI application with optimizations
 app = FastAPI(
@@ -123,17 +130,21 @@ app = FastAPI(
     lifespan=lifespan,
     # Optimize OpenAPI generation
     openapi_tags=[
-        {"name": "Authentication", "description": "User authentication and authorization"},
+        {
+            "name": "Authentication",
+            "description": "User authentication and authorization",
+        },
         {"name": "Users", "description": "User management (admin only)"},
         {"name": "Slippers", "description": "Slipper catalog and image management"},
         {"name": "Orders", "description": "Order processing and tracking"},
         {"name": "Categories", "description": "Product category management"},
-    # System diagnostics removed for simplification; keep /health only
+        # System diagnostics removed for simplification; keep /health only
     ],
     # Enable docs for development
     docs_url="/docs",
-    redoc_url="/redoc", 
-    openapi_url="/openapi.json")
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+)
 """CORS middleware configuration
 We support both a concrete allow_origins list and a regex (allow_origin_regex) to
 cover www/non-www and subdomain variants. Trailing slashes are stripped since
@@ -142,11 +153,11 @@ it takes precedence over the explicit list.
 """
 # Normalize origins
 allowed: list[str] = []
-for o in settings.ALLOWED_ORIGINS.split(','):
+for o in settings.ALLOWED_ORIGINS.split(","):
     o = (o or "").strip()
     if not o:
         continue
-    if o.endswith('/'):
+    if o.endswith("/"):
         o = o[:-1]
     allowed.append(o)
 
@@ -165,7 +176,9 @@ if getattr(settings, "ALLOWED_ORIGIN_REGEX", None):
     cors_kwargs["allow_origin_regex"] = settings.ALLOWED_ORIGIN_REGEX
 
 # Startup log for visibility
-print(f"[CORS] allowed_origins={allowed} regex={getattr(settings, 'ALLOWED_ORIGIN_REGEX', None)}")
+print(
+    f"[CORS] allowed_origins={allowed} regex={getattr(settings, 'ALLOWED_ORIGIN_REGEX', None)}"
+)
 
 # Performance middleware
 app.add_middleware(PerformanceMiddleware)
@@ -176,10 +189,11 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Simple global rate limiting middleware (IP-based) - optimized
-from collections import defaultdict, deque
-import time
 _req_log = defaultdict(lambda: deque(maxlen=100))  # Use maxlen for automatic cleanup
-_exclude = {p.strip() for p in settings.RATE_LIMIT_EXCLUDE_PATHS.split(',') if p.strip()}
+_exclude = {
+    p.strip() for p in settings.RATE_LIMIT_EXCLUDE_PATHS.split(",") if p.strip()
+}
+
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
@@ -191,13 +205,13 @@ async def rate_limit_middleware(request: Request, call_next):
         # will set the echo origin. Here we just return early to avoid other middlewares blocking it.
         return response
     path = request.url.path
-    if path in _exclude or path.startswith('/static'):  # Fast path for excluded routes
+    if path in _exclude or path.startswith("/static"):  # Fast path for excluded routes
         return await call_next(request)
 
     # Identify client IP - optimized
     if settings.TRUST_PROXY:
         fwd = request.headers.get("x-forwarded-for")
-        client_ip = fwd.split(',', 1)[0].strip() if fwd else request.client.host
+        client_ip = fwd.split(",", 1)[0].strip() if fwd else request.client.host
     else:
         client_ip = request.client.host
 
@@ -205,11 +219,11 @@ async def rate_limit_middleware(request: Request, call_next):
     window = settings.RATE_LIMIT_WINDOW_SEC
     limit = settings.RATE_LIMIT_REQUESTS
     dq = _req_log[client_ip]
-    
+
     # Clean old entries - optimized with maxlen
     while dq and now - dq[0] > window:
         dq.popleft()
-    
+
     if len(dq) >= limit:
         reset_in = int(window - (now - dq[0])) if dq else window
         return JSONResponse(
@@ -219,12 +233,12 @@ async def rate_limit_middleware(request: Request, call_next):
                 "X-RateLimit-Limit": str(limit),
                 "X-RateLimit-Remaining": "0",
                 "X-RateLimit-Reset": str(reset_in),
-                "Retry-After": str(reset_in)
-            }
+                "Retry-After": str(reset_in),
+            },
         )
     dq.append(now)
     response = await call_next(request)
-    
+
     # Add rate limit headers - avoid recalculation
     remaining = limit - len(dq)
     response.headers["X-RateLimit-Limit"] = str(limit)
@@ -234,9 +248,11 @@ async def rate_limit_middleware(request: Request, call_next):
         response.headers["X-RateLimit-Reset"] = str(reset_in)
     return response
 
+
 # Register CORS middleware LAST so it becomes the outermost middleware and reliably
 # handles preflight OPTIONS before other middlewares can interfere.
 app.add_middleware(CORSMiddleware, **cors_kwargs)
+
 
 # Global exception handler
 @app.exception_handler(Exception)
@@ -246,9 +262,14 @@ async def global_exception_handler(request, exc):
         status_code=500,
         content={
             "detail": "Internal server error",
-            "message": str(exc) if os.getenv("DEBUG", "False").lower() == "true" else "Something went wrong"
-        }
+            "message": (
+                str(exc)
+                if os.getenv("DEBUG", "False").lower() == "true"
+                else "Something went wrong"
+            ),
+        },
     )
+
 
 # Include routers
 
@@ -257,7 +278,9 @@ app.include_router(users.router, prefix="/users", tags=["Users"])
 app.include_router(categories.router, prefix="/categories", tags=["Categories"])
 app.include_router(slippers.router, prefix="/slippers", tags=["Slippers"])
 app.include_router(orders.router, prefix="/orders", tags=["Orders"])
-app.include_router(octo_payments.router, prefix="/payments/octo", tags=["Payments (OCTO)"])
+app.include_router(
+    octo_payments.router, prefix="/payments/octo", tags=["Payments (OCTO)"]
+)
 # Cart router already defines its tag; avoid re-specifying to prevent duplicates
 app.include_router(cart_router.router)
 # System diagnostics router removed
@@ -265,6 +288,7 @@ app.include_router(cart_router.router)
 # Serve static files (images, etc.)
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
 
 # Root endpoint
 @app.get("/", tags=["Root"])
@@ -274,28 +298,35 @@ async def root():
         "message": "🥿 Slippers Order System API",
         "version": "2.0.0",
         "docs": "/docs",
-        "status": "operational"
+        "status": "operational",
     }
+
 
 # Slow request logging middleware (diagnostics) - optimized
 SLOW_REQUEST_THRESHOLD_SEC = 1.0  # adjust as needed
+
 
 @app.middleware("http")
 async def slow_request_logger(request: Request, call_next):
     start = time.time()
     response = await call_next(request)
     duration = time.time() - start
-    
+
     # Only log if slow and not a static file
-    if duration > SLOW_REQUEST_THRESHOLD_SEC and not request.url.path.startswith('/static'):
-        logger.warning("Slow request path=%s duration=%.3fs", request.url.path, duration)
-    
+    if duration > SLOW_REQUEST_THRESHOLD_SEC and not request.url.path.startswith(
+        "/static"
+    ):
+        logger.warning(
+            "Slow request path=%s duration=%.3fs", request.url.path, duration
+        )
+
     # Reuse existing variables, avoid formatting overhead for fast requests
     response.headers["X-Process-Time"] = f"{duration:.3f}s"
     response.headers["X-Uptime"] = str(int(time.time() - START_TIME))
     return response
 
-# Health check endpoint  
+
+# Health check endpoint
 @app.get("/health", tags=["System"], response_model=HealthCheckResponse)
 async def health_check():
     """Health check endpoint for monitoring"""
@@ -304,16 +335,18 @@ async def health_check():
         timestamp=datetime.utcnow(),
         version="2.0.0",
         database=True,
-        cache=True
+        cache=True,
     )
 
 
 # Database pool status endpoint (admin only)
-@app.get("/admin/db-pool-status", tags=["System"], dependencies=[Depends(get_current_admin)])
+@app.get(
+    "/admin/db-pool-status", tags=["System"], dependencies=[Depends(get_current_admin)]
+)
 async def get_db_pool_status():
     """Get database connection pool statistics - Admin only"""
     from app.db.database import engine
-    
+
     pool = engine.pool
     return {
         "pool_size": pool.size(),
@@ -323,14 +356,15 @@ async def get_db_pool_status():
         "total_connections": pool.checkedin() + pool.checkedout(),
         "max_overflow": engine.pool._max_overflow,
         "pool_timeout": engine.pool._timeout,
-        "status": "healthy" if pool.checkedin() > 0 else "warning"
+        "status": "healthy" if pool.checkedin() > 0 else "warning",
     }
+
 
 if __name__ == "__main__":
     uvicorn.run(
         "app.main:app",
-    host=settings.APP_HOST,
-    port=settings.APP_PORT,
+        host=settings.APP_HOST,
+        port=settings.APP_PORT,
         reload=True,
-        log_level="info"
-    ) 
+        log_level="info",
+    )

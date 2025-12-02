@@ -1,7 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import QueuePool
-from sqlalchemy import event
 from typing import AsyncGenerator
 import os
 import logging
@@ -29,16 +28,16 @@ engine = create_async_engine(
     DATABASE_URL,
     echo=False,
     poolclass=QueuePool,
-    pool_size=50,           # Increased from 20 for higher concurrency
-    max_overflow=100,       # Increased from 30 for burst traffic
+    pool_size=50,  # Increased from 20 for higher concurrency
+    max_overflow=100,  # Increased from 30 for burst traffic
     pool_pre_ping=True,
-    pool_recycle=1800,      # Recycle connections every 30min
-    pool_timeout=10,        # Reduced timeout for faster failure detection
+    pool_recycle=1800,  # Recycle connections every 30min
+    pool_timeout=10,  # Reduced timeout for faster failure detection
     connect_args={
         "command_timeout": 30,  # Reduced from 60s
         "server_settings": {
-            "jit": "off",                    # JIT disabled for predictable performance
-            "statement_timeout": "30000",    # 30s query timeout
+            "jit": "off",  # JIT disabled for predictable performance
+            "statement_timeout": "30000",  # 30s query timeout
             "idle_in_transaction_session_timeout": "60000",  # Kill idle txns after 1min
         },
         "prepared_statement_cache_size": 500,  # Cache prepared statements
@@ -46,7 +45,7 @@ engine = create_async_engine(
     # Enable query result caching and execution options
     execution_options={
         "compiled_cache": {},  # Enable SQLAlchemy query compilation cache
-    }
+    },
 )
 
 # Create async session factory with optimizations
@@ -58,9 +57,11 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,  # Manual control over when to flush - reduces round trips
 )
 
+
 # Base class for all models
 class Base(DeclarativeBase):
     pass
+
 
 # Dependency to get database session
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
@@ -76,7 +77,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             # Validation errors occur before hitting business logic; treat quietly
             await session.rollback()
             raise
-        except Exception as e:
+        except Exception:
             await session.rollback()
             # Log full stack trace and exception details for unexpected errors
             logger.exception("Database session error")
@@ -122,13 +123,16 @@ def _ensure_database_exists_sync(sa_url: str) -> bool:
                 if not exists:
                     owner = url.username
                     if owner:
-                        cur.execute(f"CREATE DATABASE \"{target_db}\" OWNER \"{owner}\" ENCODING 'UTF8'")
+                        cur.execute(
+                            f'CREATE DATABASE "{target_db}" OWNER "{owner}" ENCODING \'UTF8\''
+                        )
                     else:
                         cur.execute(f"CREATE DATABASE \"{target_db}\" ENCODING 'UTF8'")
                     created = True
     except Exception as e:  # pragma: no cover
         logger.warning("Auto-create DB failed or not permitted: %s", e)
     return created
+
 
 # Initialize database tables
 async def init_db():
@@ -146,10 +150,11 @@ async def init_db():
         from app.models.order import Order, OrderItem  # noqa: F401
         from app.models.cart import Cart, CartItem  # noqa: F401
         from app.models.payment import Payment  # noqa: F401
-        
+
         # Create all tables
         await conn.run_sync(Base.metadata.create_all)
         logger.info("✅ Database tables created successfully!")
+
 
 # Close database connections
 async def close_db():

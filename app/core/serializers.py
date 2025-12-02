@@ -25,7 +25,13 @@ def slipper_image_to_dict(img: SlipperImage) -> Dict[str, Any]:
 def _sort_images(images: List[SlipperImage]) -> List[SlipperImage]:
     """Sort images with primary first, then by order_index."""
     try:
-        return sorted(images, key=lambda im: (0 if getattr(im, "is_primary", False) else 1, getattr(im, "order_index", 0)))
+        return sorted(
+            images,
+            key=lambda im: (
+                0 if getattr(im, "is_primary", False) else 1,
+                getattr(im, "order_index", 0),
+            ),
+        )
     except Exception:
         # Fallback: return as-is to avoid breaking response on unusual data
         return list(images)
@@ -52,6 +58,13 @@ def slipper_to_dict(s: Slipper, include_images: bool = True) -> Dict[str, Any]:
         images_sorted = _sort_images(s.images)
         item["images"] = [slipper_image_to_dict(img) for img in images_sorted]
         item["image_gallery"] = [img.image_path for img in images_sorted]
-        item["primary_image"] = next((img.image_path for img in images_sorted if getattr(img, "is_primary", False)), s.image)
+        item["primary_image"] = next(
+            (
+                img.image_path
+                for img in images_sorted
+                if getattr(img, "is_primary", False)
+            ),
+            s.image,
+        )
 
     return item

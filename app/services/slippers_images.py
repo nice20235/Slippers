@@ -38,16 +38,21 @@ async def upload_images_for_slipper(
     Returns: (first_image_path, uploaded_images_info)
     """
     if len(files) > 10:
-        raise HTTPException(status_code=400, detail="Too many images. Maximum 10 images allowed.")
+        raise HTTPException(
+            status_code=400, detail="Too many images. Maximum 10 images allowed."
+        )
 
     os.makedirs(_static_images_dir(), exist_ok=True)
 
     # Check if primary exists
     has_primary = False
     res = await db.execute(
-        select(SlipperImage.id).where(
-            (SlipperImage.slipper_id == slipper.id) & (SlipperImage.is_primary == True)  # noqa: E712
-        ).limit(1)
+        select(SlipperImage.id)
+        .where(
+            (SlipperImage.slipper_id == slipper.id)
+            & (SlipperImage.is_primary == True)  # noqa: E712
+        )
+        .limit(1)
     )
     has_primary = res.scalar_one_or_none() is not None
 
@@ -57,7 +62,9 @@ async def upload_images_for_slipper(
     for idx, file in enumerate(files):
         ext = os.path.splitext(file.filename or "")[1].lower()
         if ext not in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
-            raise HTTPException(status_code=400, detail=f"Invalid image format for file {file.filename}")
+            raise HTTPException(
+                status_code=400, detail=f"Invalid image format for file {file.filename}"
+            )
 
         filename = f"{uuid4().hex}{ext}"
         abs_path = os.path.join(_static_images_dir(), filename)
@@ -93,15 +100,21 @@ async def upload_images_for_slipper(
     # If we just created a primary, ensure only one primary remains
     if (not has_primary) and first_image_path:
         res = await db.execute(
-            select(SlipperImage.id).where(
-                (SlipperImage.slipper_id == slipper.id) & (SlipperImage.image_path == first_image_path)
-            ).limit(1)
+            select(SlipperImage.id)
+            .where(
+                (SlipperImage.slipper_id == slipper.id)
+                & (SlipperImage.image_path == first_image_path)
+            )
+            .limit(1)
         )
         new_primary_id = res.scalar_one_or_none()
         if new_primary_id:
             await db.execute(
                 update(SlipperImage)
-                .where((SlipperImage.slipper_id == slipper.id) & (SlipperImage.id != new_primary_id))
+                .where(
+                    (SlipperImage.slipper_id == slipper.id)
+                    & (SlipperImage.id != new_primary_id)
+                )
                 .values(is_primary=False)
             )
 
